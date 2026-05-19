@@ -36,7 +36,13 @@ fn run() -> Result<i32> {
                 OutputFormat::Json => render_json(&result)?,
             }
 
-            Ok(if result.findings.is_empty() { 0 } else { 1 })
+            Ok(if !result.parse_failures.is_empty() {
+                2
+            } else if result.findings.is_empty() {
+                0
+            } else {
+                1
+            })
         }
         Commands::Rules {
             command: RulesCommands::List,
@@ -53,6 +59,14 @@ fn render_rule_list() -> Result<i32> {
 }
 
 fn render_human(result: &sentio_core::ScanResult) {
+    if !result.parse_failures.is_empty() {
+        println!("Parse failures:");
+        for failure in &result.parse_failures {
+            println!("{} {}", failure.path, failure.message);
+        }
+        println!();
+    }
+
     if result.findings.is_empty() {
         println!("No findings.");
         return;

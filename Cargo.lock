@@ -176,6 +176,7 @@ name = "sentio-core"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "syn",
  "walkdir",
 ]
 

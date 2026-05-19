@@ -8,4 +8,5 @@ authors.workspace = true
 
 [dependencies]
 serde.workspace = true
+syn.workspace = true
 walkdir.workspace = true
