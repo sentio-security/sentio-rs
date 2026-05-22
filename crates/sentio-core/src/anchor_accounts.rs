@@ -1,9 +1,7 @@
+use crate::ast_index::{collect_ast_index, AstAttr, AstField, AstStruct};
 use quote::ToTokens;
 use serde::Serialize;
-use syn::meta::ParseNestedMeta;
-use syn::punctuated::Punctuated;
-use syn::spanned::Spanned;
-use syn::{Attribute, Fields, GenericArgument, Path, PathArguments, Token, Type, TypePath};
+use syn::{GenericArgument, PathArguments, Type, TypePath};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AnchorAccountsIndex {
@@ -12,18 +10,15 @@ pub struct AnchorAccountsIndex {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AnchorAccountsStruct {
-    pub name: String,
-    pub span: AnchorSpan,
+    pub ast: AstStruct,
     pub fields: Vec<AnchorAccountsField>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AnchorAccountsField {
-    pub name: String,
-    pub ty: String,
+    pub ast: AstField,
     pub type_info: AnchorFieldType,
     pub constraints: AnchorFieldConstraints,
-    pub span: AnchorSpan,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -108,99 +103,83 @@ pub enum AnchorConstraintKind {
     Custom,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub struct AnchorSpan {
-    pub start_line: usize,
-    pub start_column: usize,
-    pub end_line: usize,
-    pub end_column: usize,
-}
-
 pub fn collect_anchor_accounts_index(file: &syn::File) -> AnchorAccountsIndex {
-    let mut structs = Vec::new();
-    collect_from_items(&file.items, &mut structs);
+    let ast_index = collect_ast_index(file);
+    let structs = ast_index
+        .structs
+        .into_iter()
+        .filter_map(collect_accounts_struct)
+        .collect();
 
     AnchorAccountsIndex { structs }
 }
 
-fn collect_from_items(items: &[syn::Item], structs: &mut Vec<AnchorAccountsStruct>) {
-    for item in items {
-        match item {
-            syn::Item::Struct(item) => collect_struct(item, structs),
-            syn::Item::Mod(module) => {
-                if let Some((_, nested_items)) = &module.content {
-                    collect_from_items(nested_items, structs);
-                }
-            }
-            _ => {}
-        }
+fn collect_accounts_struct(ast: AstStruct) -> Option<AnchorAccountsStruct> {
+    if !has_anchor_accounts_derive(&ast.attrs) {
+        return None;
+    }
+
+    let fields = ast
+        .fields
+        .iter()
+        .cloned()
+        .filter(|field| field.name.is_some())
+        .map(collect_anchor_field)
+        .collect();
+
+    Some(AnchorAccountsStruct { ast, fields })
+}
+
+fn collect_anchor_field(ast: AstField) -> AnchorAccountsField {
+    let type_info = classify_field_type(&ast.ty);
+    let constraints = collect_field_constraints(&ast.attrs);
+
+    AnchorAccountsField {
+        ast,
+        type_info,
+        constraints,
     }
 }
 
-fn collect_struct(item: &syn::ItemStruct, structs: &mut Vec<AnchorAccountsStruct>) {
-    if !has_anchor_accounts_derive(&item.attrs) {
-        return;
-    }
-
-    let mut fields = Vec::new();
-    if let Fields::Named(named) = &item.fields {
-        for field in &named.named {
-            let Some(name) = field.ident.as_ref().map(|ident| ident.to_string()) else {
-                continue;
-            };
-
-            fields.push(AnchorAccountsField {
-                name,
-                ty: type_to_string(&field.ty),
-                type_info: classify_field_type(&field.ty),
-                constraints: collect_field_constraints(&field.attrs),
-                span: span_of(field.span()),
-            });
-        }
-    }
-
-    structs.push(AnchorAccountsStruct {
-        name: item.ident.to_string(),
-        span: span_of(item.ident.span()),
-        fields,
-    });
-}
-
-fn has_anchor_accounts_derive(attrs: &[Attribute]) -> bool {
+fn has_anchor_accounts_derive(attrs: &[AstAttr]) -> bool {
     attrs.iter().any(|attr| {
-        if !attr.path().is_ident("derive") {
-            return false;
-        }
-
-        attr.parse_args_with(Punctuated::<Path, Token![,]>::parse_terminated)
-            .map(|paths| paths.iter().any(|path| path.is_ident("Accounts")))
-            .unwrap_or(false)
+        attr.path == "derive"
+            && attr.tokens.as_deref().is_some_and(|tokens| {
+                tokens
+                    .split(',')
+                    .map(normalize_path)
+                    .any(|path| path == "Accounts")
+            })
     })
 }
 
-fn collect_field_constraints(attrs: &[Attribute]) -> AnchorFieldConstraints {
+fn collect_field_constraints(attrs: &[AstAttr]) -> AnchorFieldConstraints {
     let mut constraints = AnchorFieldConstraints::default();
 
     for attr in attrs {
-        if !attr.path().is_ident("account") {
+        if attr.path != "account" {
             continue;
         }
 
-        let _ = attr.parse_nested_meta(|meta| {
-            let path = path_to_string(&meta.path);
-            let value = if meta.input.peek(Token![=]) {
-                Some(parse_nested_value(&meta)?)
-            } else {
-                None
-            };
+        let Some(tokens) = attr.tokens.as_deref() else {
+            continue;
+        };
+
+        for segment in split_top_level_commas(tokens) {
+            let segment = segment.trim();
+            if segment.is_empty() {
+                continue;
+            }
+
+            let (path, value) = split_constraint(segment);
+            let path = normalize_path(path);
             let constraint = AnchorConstraint {
-                kind: constraint_kind(&meta.path),
+                kind: constraint_kind(&path),
                 path,
-                value,
+                value: value.map(|value| value.trim().to_string()),
             };
             constraints.push(constraint);
-            Ok(())
-        });
+        }
     }
 
     constraints
@@ -228,74 +207,106 @@ impl AnchorFieldConstraints {
             AnchorConstraintKind::Realloc => self.realloc = true,
             AnchorConstraintKind::ReallocZero => self.realloc_zero = true,
             AnchorConstraintKind::Close => self.close = true,
-            AnchorConstraintKind::Custom => {
-                // Keep custom constraints in the index for future rule work.
-            }
+            AnchorConstraintKind::Custom => {}
         }
 
         self.items.push(constraint);
     }
 }
 
-fn parse_nested_value(meta: &ParseNestedMeta<'_>) -> syn::Result<String> {
-    let value_stream = meta.value()?;
-    let mut tokens = proc_macro2::TokenStream::new();
+fn split_top_level_commas(tokens: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    let mut brace_depth = 0usize;
 
-    while !value_stream.is_empty() && !value_stream.peek(Token![,]) {
-        let token_tree: proc_macro2::TokenTree = value_stream.parse()?;
-        tokens.extend(std::iter::once(token_tree));
+    for ch in tokens.chars() {
+        match ch {
+            '(' => paren_depth += 1,
+            ')' => paren_depth = paren_depth.saturating_sub(1),
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth = bracket_depth.saturating_sub(1),
+            '{' => brace_depth += 1,
+            '}' => brace_depth = brace_depth.saturating_sub(1),
+            ',' if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 => {
+                let segment = current.trim();
+                if !segment.is_empty() {
+                    parts.push(segment.to_string());
+                }
+                current.clear();
+                continue;
+            }
+            _ => {}
+        }
+
+        current.push(ch);
     }
 
-    Ok(tokens.to_string())
+    let segment = current.trim();
+    if !segment.is_empty() {
+        parts.push(segment.to_string());
+    }
+
+    parts
 }
 
-fn constraint_kind(path: &Path) -> AnchorConstraintKind {
-    if path.is_ident("signer") {
+fn split_constraint(segment: &str) -> (&str, Option<&str>) {
+    match segment.split_once('=') {
+        Some((path, value)) => (path.trim(), Some(value.trim())),
+        None => (segment.trim(), None),
+    }
+}
+
+fn constraint_kind(path: &str) -> AnchorConstraintKind {
+    if path == "signer" {
         AnchorConstraintKind::Signer
-    } else if path.is_ident("mut") {
+    } else if path == "mut" {
         AnchorConstraintKind::Mut
-    } else if path.is_ident("has_one") {
+    } else if path == "has_one" {
         AnchorConstraintKind::HasOne
-    } else if path.is_ident("constraint") {
+    } else if path == "constraint" {
         AnchorConstraintKind::Constraint
-    } else if path.is_ident("seeds") {
+    } else if path == "seeds" {
         AnchorConstraintKind::Seeds
-    } else if path.is_ident("bump") {
+    } else if path == "bump" {
         AnchorConstraintKind::Bump
-    } else if path.is_ident("owner") {
+    } else if path == "owner" {
         AnchorConstraintKind::Owner
-    } else if path.is_ident("address") {
+    } else if path == "address" {
         AnchorConstraintKind::Address
-    } else if path_matches(path, &["token", "mint"]) {
+    } else if path == "token::mint" {
         AnchorConstraintKind::TokenMint
-    } else if path_matches(path, &["token", "authority"]) {
+    } else if path == "token::authority" {
         AnchorConstraintKind::TokenAuthority
-    } else if path.is_ident("init") {
+    } else if path == "init" {
         AnchorConstraintKind::Init
-    } else if path.is_ident("init_if_needed") {
+    } else if path == "init_if_needed" {
         AnchorConstraintKind::InitIfNeeded
-    } else if path.is_ident("realloc") {
+    } else if path == "realloc" {
         AnchorConstraintKind::Realloc
-    } else if path_matches(path, &["realloc", "zero"]) {
+    } else if path == "realloc::zero" {
         AnchorConstraintKind::ReallocZero
-    } else if path.is_ident("close") {
+    } else if path == "close" {
         AnchorConstraintKind::Close
     } else {
         AnchorConstraintKind::Custom
     }
 }
 
-fn path_matches(path: &Path, expected: &[&str]) -> bool {
-    path.segments.len() == expected.len()
-        && path
-            .segments
-            .iter()
-            .zip(expected.iter())
-            .all(|(segment, expected)| segment.ident == *expected)
+fn classify_field_type(ty: &str) -> AnchorFieldType {
+    match syn::parse_str::<Type>(ty) {
+        Ok(ty) => classify_field_type_syn(&ty),
+        Err(_) => AnchorFieldType {
+            kind: AnchorFieldTypeKind::Other,
+            display: ty.to_string(),
+            wrappers: Vec::new(),
+        },
+    }
 }
 
-fn classify_field_type(ty: &Type) -> AnchorFieldType {
-    let display = type_to_string(ty);
+fn classify_field_type_syn(ty: &Type) -> AnchorFieldType {
+    let display = ty.to_token_stream().to_string();
     let (kind, wrappers) = classify_field_type_inner(ty);
 
     AnchorFieldType {
@@ -375,28 +386,17 @@ fn first_type_argument(arguments: &PathArguments) -> Option<&Type> {
     })
 }
 
-fn path_to_string(path: &Path) -> String {
-    path.segments
-        .iter()
-        .map(|segment| segment.ident.to_string().trim_start_matches("r#").to_string())
+fn normalize_path(path: &str) -> String {
+    let compact: String = path.split_whitespace().collect();
+    compact
+        .split("::")
+        .map(|segment| segment.strip_prefix("r#").unwrap_or(segment))
         .collect::<Vec<_>>()
         .join("::")
 }
 
 fn type_to_string(ty: &Type) -> String {
     ty.to_token_stream().to_string()
-}
-
-fn span_of(span: proc_macro2::Span) -> AnchorSpan {
-    let start = span.start();
-    let end = span.end();
-
-    AnchorSpan {
-        start_line: start.line,
-        start_column: start.column,
-        end_line: end.line,
-        end_column: end.column,
-    }
 }
 
 #[cfg(test)]
@@ -426,7 +426,7 @@ mod tests {
 
         let index = collect_anchor_accounts_index(&file);
         assert_eq!(index.structs.len(), 1);
-        assert_eq!(index.structs[0].name, "Update");
+        assert_eq!(index.structs[0].ast.name, "Update");
         assert_eq!(index.structs[0].fields.len(), 1);
     }
 
