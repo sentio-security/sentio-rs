@@ -3,8 +3,8 @@
 Rust-based CLI scanner for common Solana program vulnerability patterns.
 
 `sentio-rs` is the Rust implementation of Sentio's pre-audit security scanner for
-Anchor and native Solana programs. The first production milestone is a stable,
-fast CLI with deterministic findings, JSON output, and inline suppressions.
+Anchor and native Solana programs. The current focus is a stable CLI, a reusable
+AST index, inline suppressions, and the first high-signal Anchor rules.
 
 ## Scope
 
@@ -13,6 +13,8 @@ fast CLI with deterministic findings, JSON output, and inline suppressions.
 - Support human and JSON output modes
 - Support rule filtering and inline suppressions
 - Ignore tests by default to reduce false positives
+- Anchor-aware AST extraction for future rules
+- First shipped rule: `SW012` missing seeds + bump on PDA
 
 ## Planned CLI
 
@@ -23,6 +25,16 @@ sentio-rs scan . --rule SW017
 sentio-rs scan . --include-tests
 sentio-rs rules list
 ```
+
+## Current Status
+
+- `scan <path>` works
+- `--format human|json` works
+- `--rule SW###` is wired
+- `--include-tests` works
+- inline suppressions work
+- `SW012` is implemented and tested
+- `SW018` is next
 
 ## Workspace Layout
 
