@@ -1,5 +1,6 @@
 use crate::finding::Finding;
-use crate::syntax::{parse_rust_files, ParseFailure};
+use crate::rules::{convert_severity, RuleContext, RuleRegistry, SuppressionSet};
+use crate::syntax::{parse_rust_files, ParseFailure, ParsedFile, SyntaxReport};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
@@ -18,27 +19,81 @@ pub struct ScanResult {
     pub parse_failures: Vec<ParseFailure>,
 }
 
-#[derive(Debug, Default)]
-pub struct Scanner;
+#[derive(Default)]
+pub struct Scanner {
+    rules: RuleRegistry,
+}
 
 impl Scanner {
     pub fn new() -> Self {
-        Self
+        Self {
+            rules: RuleRegistry::baseline(),
+        }
     }
 
     pub fn scan_path(&self, path: &str, options: &ScanOptions) -> ScanResult {
         let file_paths: Vec<PathBuf> = discover_rust_files(path, options).collect();
         let files_scanned = file_paths.len();
         let syntax_report = parse_rust_files(file_paths);
-        let files_parsed = syntax_report.files.len();
+        self.scan_report(files_scanned, syntax_report, options)
+    }
+
+    pub fn scan_report(
+        &self,
+        files_scanned: usize,
+        report: SyntaxReport,
+        options: &ScanOptions,
+    ) -> ScanResult {
+        let files_parsed = report.files.len();
+        let findings = self.run_rules(&report.files, options);
+        let parse_failures = report.parse_failures;
 
         ScanResult {
-            findings: Vec::new(),
+            findings,
             files_scanned,
             files_parsed,
-            parse_failures: syntax_report.parse_failures,
+            parse_failures,
         }
     }
+
+    fn run_rules(&self, files: &[ParsedFile], options: &ScanOptions) -> Vec<Finding> {
+        let ctx = RuleContext { files };
+        let suppressions: Vec<(String, SuppressionSet)> = files
+            .iter()
+            .map(|file| (file.path.display().to_string(), SuppressionSet::from_source(&file.source)))
+            .collect();
+
+        let mut findings = Vec::new();
+        for file in files {
+            for rule in self.rules.matching_rules(options.rule_filter.as_deref()) {
+                for matched in rule.match_file(file, &ctx) {
+                    let finding = Finding {
+                        rule_id: matched.rule_id.to_string(),
+                        severity: convert_severity(matched.severity),
+                        message: matched.message,
+                        location: matched.location,
+                        help: matched.help,
+                        suppressed: false,
+                    };
+
+                    if is_suppressed(&finding, &suppressions) {
+                        continue;
+                    }
+
+                    findings.push(finding);
+                }
+            }
+        }
+
+        findings
+    }
+}
+
+fn is_suppressed(finding: &Finding, suppressions: &[(String, SuppressionSet)]) -> bool {
+    suppressions
+        .iter()
+        .find(|(path, _)| path == &finding.location.path)
+        .is_some_and(|(_, set)| set.is_suppressed(finding))
 }
 
 fn discover_rust_files<'a>(
@@ -105,6 +160,44 @@ mod tests {
         fs::remove_dir_all(dir).expect("temp dir should be removed");
     }
 
+    #[test]
+    fn scan_applies_rule_filter_and_suppressions() {
+        let mut options = ScanOptions::default();
+        options.include_tests = true;
+        options.rule_filter = Some("SW012".to_string());
+        let path = fixture_path("sw012/suppressed.rs");
+        let result = Scanner::new().scan_path(path.to_str().expect("valid path"), &options);
+
+        assert_eq!(result.files_scanned, 1);
+        assert_eq!(result.files_parsed, 1);
+        assert!(result.findings.is_empty());
+    }
+
+    #[test]
+    fn scan_reports_unsuppressed_sw012() {
+        let mut options = ScanOptions::default();
+        options.include_tests = true;
+        options.rule_filter = Some("SW012".to_string());
+        let path = fixture_path("sw012/risky.rs");
+        let result = Scanner::new().scan_path(path.to_str().expect("valid path"), &options);
+
+        assert_eq!(result.findings.len(), 1);
+        assert_eq!(result.findings[0].rule_id, "SW012");
+    }
+
+    #[test]
+    fn scan_does_not_report_safe_sw012_fixture() {
+        let mut options = ScanOptions::default();
+        options.include_tests = true;
+        options.rule_filter = Some("SW012".to_string());
+        let path = fixture_path("sw012/safe.rs");
+        let result = Scanner::new().scan_path(path.to_str().expect("valid path"), &options);
+
+        assert_eq!(result.files_scanned, 1);
+        assert_eq!(result.files_parsed, 1);
+        assert!(result.findings.is_empty());
+    }
+
     fn create_temp_dir(label: &str) -> PathBuf {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -120,5 +213,12 @@ mod tests {
             fs::create_dir_all(parent).expect("parent dir should be created");
         }
         fs::write(path, source).expect("file should be written");
+    }
+
+    fn fixture_path(relative: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join(relative)
     }
 }

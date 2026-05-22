@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
-use sentio_core::{RuleCatalog, ScanOptions, Scanner};
+use sentio_core::{RuleRegistry, ScanOptions, Scanner};
 
 fn main() {
     let exit_code = match run() {
@@ -51,9 +51,10 @@ fn run() -> Result<i32> {
 }
 
 fn render_rule_list() -> Result<i32> {
-    let catalog = RuleCatalog::baseline();
-    for rule in catalog.all() {
-        println!("{}  {}", rule.id.0, rule.title);
+    let registry = RuleRegistry::baseline();
+    for rule in registry.all() {
+        let meta = rule.metadata();
+        println!("{}  {}", meta.id, meta.title);
     }
     Ok(0)
 }

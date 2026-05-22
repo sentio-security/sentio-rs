@@ -2,6 +2,7 @@ use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+
 pub struct ParsedFile {
     pub path: PathBuf,
     pub source: String,

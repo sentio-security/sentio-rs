@@ -1,0 +1,215 @@
+pub mod anchor;
+
+use crate::finding::{Finding, Severity, SourceLocation};
+use crate::syntax::ParsedFile;
+use serde::Serialize;
+use std::collections::HashMap;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RuleSeverity {
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RuleMetadata {
+    pub id: &'static str,
+    pub title: &'static str,
+    pub severity: RuleSeverity,
+    pub description: &'static str,
+    pub fix_guidance: &'static str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuleMatch {
+    pub rule_id: &'static str,
+    pub severity: RuleSeverity,
+    pub message: String,
+    pub location: SourceLocation,
+    pub help: Option<String>,
+}
+
+pub trait Rule {
+    fn metadata(&self) -> &RuleMetadata;
+    fn match_file(&self, file: &ParsedFile, ctx: &RuleContext<'_>) -> Vec<RuleMatch>;
+}
+
+#[derive(Clone, Copy)]
+pub struct RuleContext<'a> {
+    pub files: &'a [ParsedFile],
+}
+
+pub struct RuleRegistry {
+    rules: Vec<Box<dyn Rule>>,
+}
+
+impl RuleRegistry {
+    pub fn new(rules: Vec<Box<dyn Rule>>) -> Self {
+        Self { rules }
+    }
+
+    pub fn baseline() -> Self {
+        Self::new(vec![Box::new(
+            anchor::missing_pda_seeds_bump::MissingPdaSeedsBumpRule::default(),
+        )])
+    }
+
+    pub fn all(&self) -> &[Box<dyn Rule>] {
+        &self.rules
+    }
+
+    pub fn matching_rules(&self, rule_filter: Option<&str>) -> Vec<&dyn Rule> {
+        let filter = rule_filter
+            .map(normalize_rule_id)
+            .filter(|filter| !filter.is_empty());
+
+        self.rules
+            .iter()
+            .map(|rule| rule.as_ref())
+            .filter(|rule| {
+                filter
+                    .as_ref()
+                    .map_or(true, |filter| rule.metadata().id.eq_ignore_ascii_case(filter))
+            })
+            .collect()
+    }
+}
+
+impl Default for RuleRegistry {
+    fn default() -> Self {
+        Self::baseline()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SuppressionSet {
+    same_line: HashMap<usize, Vec<String>>,
+    next_line: HashMap<usize, Vec<String>>,
+}
+
+impl SuppressionSet {
+    pub fn empty() -> Self {
+        Self {
+            same_line: HashMap::new(),
+            next_line: HashMap::new(),
+        }
+    }
+
+    pub fn from_source(source: &str) -> Self {
+        let mut same_line: HashMap<usize, Vec<String>> = HashMap::new();
+        let mut next_line: HashMap<usize, Vec<String>> = HashMap::new();
+
+        for (idx, line) in source.lines().enumerate() {
+            let line_no = idx + 1;
+            if let Some(ids) = parse_ignore_directive(line, "sentio-ignore") {
+                same_line.insert(line_no, ids);
+            }
+            if let Some(ids) = parse_ignore_directive(line, "sentio-ignore-next-line") {
+                next_line.insert(line_no + 1, ids);
+            }
+        }
+
+        Self {
+            same_line,
+            next_line,
+        }
+    }
+
+    pub fn is_suppressed(&self, finding: &Finding) -> bool {
+        let rule_id = finding.rule_id.to_uppercase();
+        let line = finding.location.line;
+
+        self.same_line
+            .get(&line)
+            .is_some_and(|ids| ids.iter().any(|id| id == &rule_id))
+            || self
+                .next_line
+                .get(&line)
+                .is_some_and(|ids| ids.iter().any(|id| id == &rule_id))
+    }
+}
+
+pub fn convert_severity(severity: RuleSeverity) -> Severity {
+    match severity {
+        RuleSeverity::Low => Severity::Low,
+        RuleSeverity::Medium => Severity::Medium,
+        RuleSeverity::High => Severity::High,
+        RuleSeverity::Critical => Severity::Critical,
+    }
+}
+
+fn normalize_rule_id(rule_id: &str) -> String {
+    rule_id.trim().to_uppercase()
+}
+
+fn parse_ignore_directive(line: &str, directive: &str) -> Option<Vec<String>> {
+    let lower = line.to_lowercase();
+    let compact = lower.replace(char::is_whitespace, "");
+    let marker = format!("//{directive}");
+    let start = compact.find(&marker)? + marker.len();
+    let ids = compact[start..]
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .map(|s| s.trim().to_uppercase())
+        .filter(|id| is_rule_id(id))
+        .collect::<Vec<_>>();
+
+    if ids.is_empty() {
+        None
+    } else {
+        Some(ids)
+    }
+}
+
+fn is_rule_id(id: &str) -> bool {
+    id.len() == 5
+        && id.starts_with("SW")
+        && id[2..].chars().all(|c| c.is_ascii_digit())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_same_line_and_next_line_suppressions() {
+        let suppressions = SuppressionSet::from_source(
+            r#"
+            // sentio-ignore SW012, SW018
+            let a = 1;
+            // sentio-ignore-next-line SW012
+            let b = 2;
+            "#,
+        );
+
+        let same_line = Finding {
+            rule_id: "SW012".to_string(),
+            severity: Severity::High,
+            message: String::new(),
+            location: SourceLocation {
+                path: "x.rs".to_string(),
+                line: 2,
+                column: 1,
+            },
+            help: None,
+            suppressed: false,
+        };
+        let next_line = Finding {
+            rule_id: "SW012".to_string(),
+            severity: Severity::High,
+            message: String::new(),
+            location: SourceLocation {
+                path: "x.rs".to_string(),
+                line: 5,
+                column: 1,
+            },
+            help: None,
+            suppressed: false,
+        };
+
+        assert!(suppressions.is_suppressed(&same_line));
+        assert!(suppressions.is_suppressed(&next_line));
+    }
+}

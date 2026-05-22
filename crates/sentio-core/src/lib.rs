@@ -2,6 +2,7 @@ pub mod ast_index;
 pub mod anchor_accounts;
 pub mod finding;
 pub mod registry;
+pub mod rules;
 pub mod scanner;
 pub mod syntax;
 
@@ -11,7 +12,8 @@ pub use anchor_accounts::{
     AnchorAccountsStruct, AnchorConstraint, AnchorConstraintKind, AnchorFieldConstraints,
     AnchorFieldType, AnchorFieldTypeKind, AnchorTypeWrapper, AnchorTypeWrapperKind,
 };
-pub use finding::{Finding, Severity, SourceLocation};
+pub use finding::{Finding, FileLocation, Severity, SourceLocation};
 pub use registry::{Rule, RuleCatalog, RuleId};
+pub use rules::{RuleContext, RuleMetadata, RuleMatch, RuleRegistry, RuleSeverity, SuppressionSet};
 pub use scanner::{ScanOptions, ScanResult, Scanner};
 pub use syntax::{ParseFailure, ParsedFile, SyntaxReport};

@@ -37,28 +37,13 @@ impl RuleCatalog {
     pub fn baseline() -> Self {
         Self::new(vec![
             Rule {
-                id: RuleId("SW011"),
-                title: "AccountInfo used for data account",
+                id: RuleId("SW012"),
+                title: "Missing seeds + bump on PDA",
                 default_enabled: true,
             },
             Rule {
-                id: RuleId("SW013"),
-                title: "Missing seeds and bump on PDA",
-                default_enabled: true,
-            },
-            Rule {
-                id: RuleId("SW017"),
-                title: "init_if_needed usage",
-                default_enabled: true,
-            },
-            Rule {
-                id: RuleId("SW019"),
+                id: RuleId("SW018"),
                 title: "Missing realloc::zero = true",
-                default_enabled: true,
-            },
-            Rule {
-                id: RuleId("SW021"),
-                title: "AccountInfo as CPI target program",
                 default_enabled: true,
             },
         ])

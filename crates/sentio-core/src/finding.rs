@@ -17,6 +17,12 @@ pub struct SourceLocation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct FileLocation {
+    pub path: String,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Finding {
     pub rule_id: String,
     pub severity: Severity,
