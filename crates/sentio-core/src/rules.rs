@@ -52,9 +52,10 @@ impl RuleRegistry {
     }
 
     pub fn baseline() -> Self {
-        Self::new(vec![Box::new(
-            anchor::missing_pda_seeds_bump::MissingPdaSeedsBumpRule::default(),
-        )])
+        Self::new(vec![
+            Box::new(anchor::missing_pda_seeds_bump::MissingPdaSeedsBumpRule::default()),
+            Box::new(anchor::init_if_needed_usage::InitIfNeededUsageRule::default()),
+        ])
     }
 
     pub fn all(&self) -> &[Box<dyn Rule>] {

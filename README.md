@@ -33,7 +33,7 @@ sentio-rs rules list
 - `--rule SW###` is wired
 - `--include-tests` works
 - inline suppressions work
-- `SW012` is implemented and tested
+- `SW012` and `SW016` are implemented and tested
 - `SW018` is next
 
 ## Workspace Layout

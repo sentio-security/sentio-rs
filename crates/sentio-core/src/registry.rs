@@ -42,8 +42,8 @@ impl RuleCatalog {
                 default_enabled: true,
             },
             Rule {
-                id: RuleId("SW018"),
-                title: "Missing realloc::zero = true",
+                id: RuleId("SW016"),
+                title: "init_if_needed usage (manual review)",
                 default_enabled: true,
             },
         ])

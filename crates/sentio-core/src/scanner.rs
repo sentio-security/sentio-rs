@@ -198,6 +198,44 @@ mod tests {
         assert!(result.findings.is_empty());
     }
 
+    #[test]
+    fn scan_applies_sw016_rule_filter_and_suppressions() {
+        let mut options = ScanOptions::default();
+        options.include_tests = true;
+        options.rule_filter = Some("SW016".to_string());
+        let path = fixture_path("sw016/suppressed.rs");
+        let result = Scanner::new().scan_path(path.to_str().expect("valid path"), &options);
+
+        assert_eq!(result.files_scanned, 1);
+        assert_eq!(result.files_parsed, 1);
+        assert!(result.findings.is_empty());
+    }
+
+    #[test]
+    fn scan_reports_unsuppressed_sw016() {
+        let mut options = ScanOptions::default();
+        options.include_tests = true;
+        options.rule_filter = Some("SW016".to_string());
+        let path = fixture_path("sw016/risky.rs");
+        let result = Scanner::new().scan_path(path.to_str().expect("valid path"), &options);
+
+        assert_eq!(result.findings.len(), 1);
+        assert_eq!(result.findings[0].rule_id, "SW016");
+    }
+
+    #[test]
+    fn scan_does_not_report_safe_sw016_fixture() {
+        let mut options = ScanOptions::default();
+        options.include_tests = true;
+        options.rule_filter = Some("SW016".to_string());
+        let path = fixture_path("sw016/safe.rs");
+        let result = Scanner::new().scan_path(path.to_str().expect("valid path"), &options);
+
+        assert_eq!(result.files_scanned, 1);
+        assert_eq!(result.files_parsed, 1);
+        assert!(result.findings.is_empty());
+    }
+
     fn create_temp_dir(label: &str) -> PathBuf {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
