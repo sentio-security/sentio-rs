@@ -1,6 +1,9 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
 use sentio_core::{RuleRegistry, ScanOptions, Scanner};
+use std::collections::BTreeMap;
+use std::fs;
+use std::io::{self, Write};
 
 fn main() {
     let exit_code = match run() {
@@ -60,30 +63,9 @@ fn render_rule_list() -> Result<i32> {
 }
 
 fn render_human(result: &sentio_core::ScanResult) {
-    if !result.parse_failures.is_empty() {
-        println!("Parse failures:");
-        for failure in &result.parse_failures {
-            println!("{} {}", failure.path, failure.message);
-        }
-        println!();
-    }
-
-    if result.findings.is_empty() {
-        println!("No findings.");
-        return;
-    }
-
-    for finding in &result.findings {
-        println!(
-            "{} [{}] {}:{}:{} {}",
-            finding.rule_id,
-            severity_label(finding.severity),
-            finding.location.path,
-            finding.location.line,
-            finding.location.column,
-            finding.message
-        );
-    }
+    let registry = RuleRegistry::baseline();
+    let mut stdout = io::stdout().lock();
+    let _ = render_human_report(result, &registry, &mut stdout);
 }
 
 fn render_json(result: &sentio_core::ScanResult) -> Result<()> {
@@ -98,6 +80,175 @@ fn severity_label(severity: sentio_core::Severity) -> &'static str {
         sentio_core::Severity::High => "high",
         sentio_core::Severity::Critical => "critical",
     }
+}
+
+fn render_human_report<W: Write>(
+    result: &sentio_core::ScanResult,
+    registry: &RuleRegistry,
+    mut writer: W,
+) -> io::Result<()> {
+    if !result.parse_failures.is_empty() {
+        writeln!(writer, "==============PARSE FAILURES==============")?;
+        for failure in &result.parse_failures {
+            writeln!(writer, "{}\n  {}", failure.path, failure.message)?;
+        }
+        writeln!(writer)?;
+    }
+
+    if result.findings.is_empty() {
+        if result.parse_failures.is_empty() {
+            writeln!(writer, "No findings.")?;
+        } else {
+            writeln!(writer, "No findings in successfully parsed files.")?;
+        }
+        return Ok(());
+    }
+
+    for (index, finding) in result.findings.iter().enumerate() {
+        let meta = lookup_metadata(registry, &finding.rule_id);
+        let title = meta.map(|item| item.title).unwrap_or("Unknown rule");
+        let description = meta.map(|item| item.description);
+        let guidance = finding
+            .help
+            .as_deref()
+            .or_else(|| meta.map(|item| item.fix_guidance));
+
+        writeln!(
+            writer,
+            "==============FINDING {}: {} {}==============",
+            index + 1,
+            finding.rule_id,
+            title
+        )?;
+        writeln!(writer, "Severity: {}", severity_label(finding.severity))?;
+        writeln!(
+            writer,
+            "Location: {}:{}:{}",
+            finding.location.path, finding.location.line, finding.location.column
+        )?;
+        writeln!(writer)?;
+
+        if let Some(description) = description {
+            writeln!(writer, "Rule:")?;
+            writeln!(writer, "  {description}")?;
+            writeln!(writer)?;
+        }
+
+        writeln!(writer, "Matched Because:")?;
+        writeln!(writer, "  {}", finding.message)?;
+        writeln!(writer)?;
+
+        writeln!(writer, "Source:")?;
+        match format_source_excerpt(
+            &finding.location.path,
+            finding.location.line,
+            finding.location.column,
+            2,
+        ) {
+            Some(excerpt) => {
+                write!(writer, "{excerpt}")?;
+            }
+            None => {
+                writeln!(writer, "  Source excerpt unavailable.")?;
+            }
+        }
+        writeln!(writer)?;
+
+        if let Some(guidance) = guidance {
+            writeln!(writer, "Guidance:")?;
+            writeln!(writer, "  {guidance}")?;
+            writeln!(writer)?;
+        }
+    }
+
+    write_summary(&mut writer, result, registry)?;
+    Ok(())
+}
+
+fn lookup_metadata<'a>(
+    registry: &'a RuleRegistry,
+    rule_id: &str,
+) -> Option<&'a sentio_core::RuleMetadata> {
+    registry
+        .all()
+        .iter()
+        .find(|rule| rule.metadata().id.eq_ignore_ascii_case(rule_id))
+        .map(|rule| rule.metadata())
+}
+
+fn format_source_excerpt(path: &str, line: usize, column: usize, radius: usize) -> Option<String> {
+    let source = fs::read_to_string(path).ok()?;
+    let lines: Vec<&str> = source.lines().collect();
+    if lines.is_empty() {
+        return None;
+    }
+
+    let hit_index = line.saturating_sub(1).min(lines.len().saturating_sub(1));
+    let start = hit_index.saturating_sub(radius);
+    let end = (hit_index + radius).min(lines.len().saturating_sub(1));
+    let width = (end + 1).to_string().len();
+    let mut output = String::new();
+
+    for current in start..=end {
+        let marker = if current == hit_index { '>' } else { ' ' };
+        output.push_str(&format!(
+            " {marker}{:>width$}| {}\n",
+            current + 1,
+            lines[current],
+            width = width
+        ));
+
+        if current == hit_index {
+            let caret_indent = " ".repeat(column.saturating_sub(1));
+            output.push_str(&format!(
+                "  {:>width$}| {caret_indent}^\n",
+                "",
+                width = width
+            ));
+        }
+    }
+
+    Some(output)
+}
+
+fn write_summary<W: Write>(
+    writer: &mut W,
+    result: &sentio_core::ScanResult,
+    registry: &RuleRegistry,
+) -> io::Result<()> {
+    let mut rule_counts: BTreeMap<String, usize> = BTreeMap::new();
+    let mut critical = 0usize;
+    let mut high = 0usize;
+    let mut medium = 0usize;
+    let mut low = 0usize;
+
+    for finding in &result.findings {
+        *rule_counts.entry(finding.rule_id.clone()).or_default() += 1;
+        match finding.severity {
+            sentio_core::Severity::Critical => critical += 1,
+            sentio_core::Severity::High => high += 1,
+            sentio_core::Severity::Medium => medium += 1,
+            sentio_core::Severity::Low => low += 1,
+        }
+    }
+
+    writeln!(writer, "-------- Summary --------")?;
+    writeln!(writer, "Total findings: {}", result.findings.len())?;
+    writeln!(writer, "Critical: {critical}")?;
+    writeln!(writer, "High: {high}")?;
+    writeln!(writer, "Medium: {medium}")?;
+    writeln!(writer, "Low: {low}")?;
+    writeln!(writer)?;
+    writeln!(writer, "By rule:")?;
+
+    for (rule_id, count) in rule_counts {
+        let title = lookup_metadata(registry, &rule_id)
+            .map(|item| item.title)
+            .unwrap_or("Unknown rule");
+        writeln!(writer, "  {count}  {rule_id} {title}")?;
+    }
+
+    Ok(())
 }
 
 #[derive(Debug, Parser)]
@@ -135,4 +286,85 @@ enum OutputFormat {
 #[derive(Debug, Subcommand)]
 enum RulesCommands {
     List,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sentio_core::{Finding, ScanResult, Severity, SourceLocation};
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn formats_source_excerpt_with_highlighted_line() {
+        let path = create_temp_file(
+            "excerpt.rs",
+            "fn main() {\n    let a = 1;\n    let b = a + 1;\n}\n",
+        );
+
+        let excerpt =
+            format_source_excerpt(path.to_str().expect("valid path"), 3, 9, 1).expect("excerpt");
+
+        assert!(excerpt.contains("  2|     let a = 1;"));
+        assert!(excerpt.contains(" >3|     let b = a + 1;"));
+        assert!(excerpt.contains("  4| }"));
+        assert!(excerpt.contains("^"));
+
+        fs::remove_file(path).expect("temp file should be removed");
+    }
+
+    #[test]
+    fn renders_detailed_human_report() {
+        let path = create_temp_file(
+            "report.rs",
+            "use anchor_lang::prelude::*;\n#[derive(Accounts)]\npub struct Example<'info> {\n    #[account(init_if_needed, payer = authority, space = 8 + Vault::LEN)]\n    pub vault: Account<'info, Vault>,\n}\n",
+        );
+        let result = ScanResult {
+            findings: vec![Finding {
+                rule_id: "SW016".to_string(),
+                severity: Severity::Medium,
+                message:
+                    "Account `vault` uses `init_if_needed`; review for re-initialization or state-reset risk."
+                        .to_string(),
+                location: SourceLocation {
+                    path: path.display().to_string(),
+                    line: 4,
+                    column: 1,
+                },
+                help: Some(
+                    "Prefer #[account(init, ...)] when possible. If init_if_needed is necessary, confirm the account cannot be abused to reset state."
+                        .to_string(),
+                ),
+                suppressed: false,
+            }],
+            files_scanned: 1,
+            files_parsed: 1,
+            parse_failures: Vec::new(),
+        };
+
+        let mut output = Vec::new();
+        render_human_report(&result, &RuleRegistry::baseline(), &mut output)
+            .expect("report should render");
+        let output = String::from_utf8(output).expect("utf8 output");
+
+        assert!(output.contains("==============FINDING 1: SW016 init_if_needed usage (manual review)=============="));
+        assert!(output.contains("Severity: medium"));
+        assert!(output.contains("Matched Because:"));
+        assert!(output.contains("Source:"));
+        assert!(output.contains(" >4|     #[account(init_if_needed, payer = authority, space = 8 + Vault::LEN)]"));
+        assert!(output.contains("-------- Summary --------"));
+        assert!(output.contains("1  SW016 init_if_needed usage (manual review)"));
+
+        fs::remove_file(path).expect("temp file should be removed");
+    }
+
+    fn create_temp_file(name: &str, source: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be valid")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("sentio-cli-{unique}-{name}"));
+        fs::write(&path, source).expect("temp file should be written");
+        path
+    }
 }
