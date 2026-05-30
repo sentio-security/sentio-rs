@@ -1,7 +1,10 @@
-use crate::ast_index::{collect_ast_index, AstAttr, AstField, AstStruct};
+use crate::ast_index::{ast_field_from_syn, ast_struct_from_syn, AstField, AstStruct};
 use quote::ToTokens;
 use serde::Serialize;
-use syn::{GenericArgument, PathArguments, Type, TypePath};
+use syn::ext::IdentExt;
+use syn::parse::{Parse, ParseStream};
+use syn::punctuated::Punctuated;
+use syn::{Attribute, Expr, GenericArgument, Item, ItemStruct, Path, PathArguments, Type, TypePath};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AnchorAccountsIndex {
@@ -104,35 +107,47 @@ pub enum AnchorConstraintKind {
 }
 
 pub fn collect_anchor_accounts_index(file: &syn::File) -> AnchorAccountsIndex {
-    let ast_index = collect_ast_index(file);
-    let structs = ast_index
-        .structs
-        .into_iter()
-        .filter_map(collect_accounts_struct)
-        .collect();
+    let mut structs = Vec::new();
+    collect_accounts_structs(&file.items, &mut structs);
 
     AnchorAccountsIndex { structs }
 }
 
-fn collect_accounts_struct(ast: AstStruct) -> Option<AnchorAccountsStruct> {
-    if !has_anchor_accounts_derive(&ast.attrs) {
-        return None;
+fn collect_accounts_structs(items: &[Item], structs: &mut Vec<AnchorAccountsStruct>) {
+    for item in items {
+        match item {
+            Item::Struct(item_struct) => {
+                if has_anchor_accounts_derive(&item_struct.attrs) {
+                    structs.push(collect_accounts_struct(item_struct));
+                }
+            }
+            Item::Mod(module) => {
+                if let Some((_, nested_items)) = &module.content {
+                    collect_accounts_structs(nested_items, structs);
+                }
+            }
+            _ => {}
+        }
     }
+}
 
-    let fields = ast
+fn collect_accounts_struct(item: &ItemStruct) -> AnchorAccountsStruct {
+    let ast = ast_struct_from_syn(item);
+
+    let fields = item
         .fields
         .iter()
-        .cloned()
-        .filter(|field| field.name.is_some())
+        .filter(|field| field.ident.is_some())
         .map(collect_anchor_field)
         .collect();
 
-    Some(AnchorAccountsStruct { ast, fields })
+    AnchorAccountsStruct { ast, fields }
 }
 
-fn collect_anchor_field(ast: AstField) -> AnchorAccountsField {
+fn collect_anchor_field(field: &syn::Field) -> AnchorAccountsField {
+    let ast = ast_field_from_syn(field);
     let type_info = classify_field_type(&ast.ty);
-    let constraints = collect_field_constraints(&ast.attrs);
+    let constraints = collect_field_constraints(&field.attrs);
 
     AnchorAccountsField {
         ast,
@@ -141,42 +156,41 @@ fn collect_anchor_field(ast: AstField) -> AnchorAccountsField {
     }
 }
 
-fn has_anchor_accounts_derive(attrs: &[AstAttr]) -> bool {
+fn has_anchor_accounts_derive(attrs: &[Attribute]) -> bool {
     attrs.iter().any(|attr| {
-        attr.path == "derive"
-            && attr.tokens.as_deref().is_some_and(|tokens| {
-                tokens
-                    .split(',')
-                    .map(normalize_path)
-                    .any(|path| path == "Accounts")
-            })
+        if !attr.path().is_ident("derive") {
+            return false;
+        }
+
+        let mut found = false;
+        let _ = attr.parse_nested_meta(|meta| {
+            if normalize_syn_path(&meta.path) == "Accounts" {
+                found = true;
+            }
+            Ok(())
+        });
+        found
     })
 }
 
-fn collect_field_constraints(attrs: &[AstAttr]) -> AnchorFieldConstraints {
+fn collect_field_constraints(attrs: &[Attribute]) -> AnchorFieldConstraints {
     let mut constraints = AnchorFieldConstraints::default();
 
     for attr in attrs {
-        if attr.path != "account" {
+        if !attr.path().is_ident("account") {
             continue;
         }
 
-        let Some(tokens) = attr.tokens.as_deref() else {
+        let parser = Punctuated::<ParsedConstraintEntry, syn::Token![,]>::parse_terminated;
+        let Ok(entries) = attr.parse_args_with(parser) else {
             continue;
         };
 
-        for segment in split_top_level_commas(tokens) {
-            let segment = segment.trim();
-            if segment.is_empty() {
-                continue;
-            }
-
-            let (path, value) = split_constraint(segment);
-            let path = normalize_path(path);
+        for entry in entries {
             let constraint = AnchorConstraint {
-                kind: constraint_kind(&path),
-                path,
-                value: value.map(|value| value.trim().to_string()),
+                kind: constraint_kind(&entry.path),
+                path: entry.path,
+                value: entry.value.map(|expr| expr.to_token_stream().to_string()),
             };
             constraints.push(constraint);
         }
@@ -211,50 +225,6 @@ impl AnchorFieldConstraints {
         }
 
         self.items.push(constraint);
-    }
-}
-
-fn split_top_level_commas(tokens: &str) -> Vec<String> {
-    let mut parts = Vec::new();
-    let mut current = String::new();
-    let mut paren_depth = 0usize;
-    let mut bracket_depth = 0usize;
-    let mut brace_depth = 0usize;
-
-    for ch in tokens.chars() {
-        match ch {
-            '(' => paren_depth += 1,
-            ')' => paren_depth = paren_depth.saturating_sub(1),
-            '[' => bracket_depth += 1,
-            ']' => bracket_depth = bracket_depth.saturating_sub(1),
-            '{' => brace_depth += 1,
-            '}' => brace_depth = brace_depth.saturating_sub(1),
-            ',' if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 => {
-                let segment = current.trim();
-                if !segment.is_empty() {
-                    parts.push(segment.to_string());
-                }
-                current.clear();
-                continue;
-            }
-            _ => {}
-        }
-
-        current.push(ch);
-    }
-
-    let segment = current.trim();
-    if !segment.is_empty() {
-        parts.push(segment.to_string());
-    }
-
-    parts
-}
-
-fn split_constraint(segment: &str) -> (&str, Option<&str>) {
-    match segment.split_once('=') {
-        Some((path, value)) => (path.trim(), Some(value.trim())),
-        None => (segment.trim(), None),
     }
 }
 
@@ -395,8 +365,48 @@ fn normalize_path(path: &str) -> String {
         .join("::")
 }
 
+fn normalize_syn_path(path: &Path) -> String {
+    normalize_path(&path.to_token_stream().to_string())
+}
+
 fn type_to_string(ty: &Type) -> String {
     ty.to_token_stream().to_string()
+}
+
+struct ParsedConstraintEntry {
+    path: String,
+    value: Option<Expr>,
+}
+
+impl Parse for ParsedConstraintEntry {
+    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
+        let path = parse_constraint_path(input)?;
+        let value = if input.peek(syn::Token![=]) {
+            input.parse::<syn::Token![=]>()?;
+            Some(input.parse::<Expr>()?)
+        } else {
+            None
+        };
+
+        Ok(Self { path, value })
+    }
+}
+
+fn parse_constraint_path(input: ParseStream<'_>) -> syn::Result<String> {
+    let mut segments = Vec::new();
+
+    loop {
+        let ident = input.call(syn::Ident::parse_any)?;
+        segments.push(ident.to_string());
+
+        if !input.peek(syn::Token![::]) {
+            break;
+        }
+
+        input.parse::<syn::Token![::]>()?;
+    }
+
+    Ok(normalize_path(&segments.join("::")))
 }
 
 #[cfg(test)]

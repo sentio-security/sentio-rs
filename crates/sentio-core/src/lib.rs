@@ -1,6 +1,7 @@
 pub mod ast_index;
 pub mod anchor_accounts;
 pub mod finding;
+pub mod instruction_analysis;
 pub mod registry;
 pub mod rules;
 pub mod scanner;
@@ -13,6 +14,10 @@ pub use anchor_accounts::{
     AnchorFieldType, AnchorFieldTypeKind, AnchorTypeWrapper, AnchorTypeWrapperKind,
 };
 pub use finding::{Finding, FileLocation, Severity, SourceLocation};
+pub use instruction_analysis::{
+    collect_instruction_index, CallEvidence, CallKind, GuardEvidence, GuardKind,
+    InstructionFunction, InstructionIndex, WriteEvidence,
+};
 pub use registry::{Rule, RuleCatalog, RuleId};
 pub use rules::{RuleContext, RuleMetadata, RuleMatch, RuleRegistry, RuleSeverity, SuppressionSet};
 pub use scanner::{ScanOptions, ScanResult, Scanner};

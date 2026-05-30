@@ -48,7 +48,7 @@ pub fn collect_ast_index(file: &syn::File) -> AstIndex {
 fn collect_from_items(items: &[syn::Item], structs: &mut Vec<AstStruct>) {
     for item in items {
         match item {
-            syn::Item::Struct(item) => structs.push(collect_struct(item)),
+            syn::Item::Struct(item) => structs.push(ast_struct_from_syn(item)),
             syn::Item::Mod(module) => {
                 if let Some((_, nested_items)) = &module.content {
                     collect_from_items(nested_items, structs);
@@ -59,31 +59,31 @@ fn collect_from_items(items: &[syn::Item], structs: &mut Vec<AstStruct>) {
     }
 }
 
-fn collect_struct(item: &syn::ItemStruct) -> AstStruct {
+pub(crate) fn ast_struct_from_syn(item: &syn::ItemStruct) -> AstStruct {
     let fields = match &item.fields {
-        Fields::Named(named) => named.named.iter().map(collect_field).collect(),
-        Fields::Unnamed(unnamed) => unnamed.unnamed.iter().map(collect_field).collect(),
+        Fields::Named(named) => named.named.iter().map(ast_field_from_syn).collect(),
+        Fields::Unnamed(unnamed) => unnamed.unnamed.iter().map(ast_field_from_syn).collect(),
         Fields::Unit => Vec::new(),
     };
 
     AstStruct {
         name: item.ident.to_string(),
-        attrs: collect_attrs(&item.attrs),
+        attrs: ast_attrs_from_syn(&item.attrs),
         fields,
         span: span_of(item.span()),
     }
 }
 
-fn collect_field(field: &syn::Field) -> AstField {
+pub(crate) fn ast_field_from_syn(field: &syn::Field) -> AstField {
     AstField {
         name: field.ident.as_ref().map(|ident| ident.to_string()),
         ty: field.ty.to_token_stream().to_string(),
-        attrs: collect_attrs(&field.attrs),
+        attrs: ast_attrs_from_syn(&field.attrs),
         span: span_of(field.span()),
     }
 }
 
-fn collect_attrs(attrs: &[Attribute]) -> Vec<AstAttr> {
+pub(crate) fn ast_attrs_from_syn(attrs: &[Attribute]) -> Vec<AstAttr> {
     attrs
         .iter()
         .map(|attr| AstAttr {
@@ -102,7 +102,7 @@ fn attr_tokens(attr: &Attribute) -> Option<String> {
     }
 }
 
-fn span_of(span: proc_macro2::Span) -> AstSpan {
+pub(crate) fn span_of(span: proc_macro2::Span) -> AstSpan {
     let start = span.start();
     let end = span.end();
 
