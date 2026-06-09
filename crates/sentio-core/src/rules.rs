@@ -53,6 +53,7 @@ impl RuleRegistry {
 
     pub fn baseline() -> Self {
         Self::new(vec![
+            Box::new(anchor::missing_signer_check::MissingSignerCheckRule::default()),
             Box::new(anchor::missing_pda_seeds_bump::MissingPdaSeedsBumpRule::default()),
             Box::new(anchor::init_if_needed_usage::InitIfNeededUsageRule::default()),
             Box::new(anchor::missing_realloc_zero::MissingReallocZeroRule::default()),

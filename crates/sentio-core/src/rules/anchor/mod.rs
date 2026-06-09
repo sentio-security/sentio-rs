@@ -6,3 +6,4 @@ pub mod missing_cpi_reload;
 pub mod missing_owner_check;
 pub mod missing_pda_seeds_bump;
 pub mod missing_realloc_zero;
+pub mod missing_signer_check;
