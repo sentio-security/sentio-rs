@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
 use sentio_cli::render_human_report;
 use sentio_core::{RuleRegistry, ScanOptions, Scanner};
-use std::io::{self, IsTerminal, Write};
+use std::io::{self, IsTerminal};
 
 fn main() {
     let exit_code = match run() {

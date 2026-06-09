@@ -1,6 +1,7 @@
 use crate::ast_index::{span_of, AstSpan};
 use quote::ToTokens;
 use serde::Serialize;
+use std::collections::HashMap;
 use syn::parse::Parser;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
@@ -45,6 +46,9 @@ pub struct CallEvidence {
     pub callee: String,
     pub span: AstSpan,
     pub order: usize,
+    /// Account names extracted from the CpiContext struct for this CPI call.
+    /// Empty when the CPI accounts could not be resolved (raw invoke, unknown binding).
+    pub cpi_account_names: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -137,6 +141,10 @@ struct FunctionBodyCollector {
     guards: Vec<GuardEvidence>,
     calls: Vec<CallEvidence>,
     writes: Vec<WriteEvidence>,
+    /// Maps local variable names to the account names found in the struct literal they were
+    /// bound to (e.g. `let accounts = Transfer { from: ctx.accounts.vault, ... }` →
+    /// `"accounts" → ["vault", ...]`). Used to resolve CpiContext args by name.
+    let_bindings: HashMap<String, Vec<String>>,
 }
 
 impl FunctionBodyCollector {
@@ -169,14 +177,54 @@ impl FunctionBodyCollector {
         });
     }
 
-    fn push_call(&mut self, callee: String, span: proc_macro2::Span) {
+    fn push_call(&mut self, callee: String, span: proc_macro2::Span, cpi_account_names: Vec<String>) {
         let order = self.order();
         self.calls.push(CallEvidence {
             kind: classify_call_kind(&callee),
             callee,
             span: span_of(span),
             order,
+            cpi_account_names,
         });
+    }
+
+    /// Walk `expr` and return the account names it refers to, following variable
+    /// bindings recorded in `self.let_bindings`. Handles:
+    /// - struct literals: `Transfer { from: ctx.accounts.X, ... }` → `["X", ...]`
+    /// - `CpiContext::new(prog, accounts_expr)` → recurse on accounts_expr
+    /// - variable paths: look up in `let_bindings`
+    /// - references `&expr`: strip and recurse
+    fn extract_account_names_from_expr(&self, expr: &syn::Expr) -> Vec<String> {
+        match expr {
+            syn::Expr::Struct(s) => s
+                .fields
+                .iter()
+                .filter_map(|f| {
+                    let val = normalize_tokens(&f.expr.to_token_stream().to_string());
+                    extract_account_name_from_str(&val)
+                })
+                .collect(),
+            syn::Expr::Call(call) => {
+                let func = normalize_tokens(&call.func.to_token_stream().to_string());
+                if func.contains("CpiContext::new") {
+                    if let Some(accounts_arg) = call.args.iter().nth(1) {
+                        return self.extract_account_names_from_expr(accounts_arg);
+                    }
+                }
+                vec![]
+            }
+            syn::Expr::Path(p) => {
+                let var = p
+                    .path
+                    .segments
+                    .last()
+                    .map(|s| s.ident.to_string())
+                    .unwrap_or_default();
+                self.let_bindings.get(&var).cloned().unwrap_or_default()
+            }
+            syn::Expr::Reference(r) => self.extract_account_names_from_expr(&r.expr),
+            _ => vec![],
+        }
     }
 
     fn push_write(&mut self, target: String, span: proc_macro2::Span) {
@@ -222,16 +270,39 @@ impl<'ast> Visit<'ast> for FunctionBodyCollector {
         visit::visit_expr_macro(self, node);
     }
 
+    fn visit_local(&mut self, node: &'ast syn::Local) {
+        if let (Some(init), Some(var_name)) = (&node.init, get_simple_pat_ident(&node.pat)) {
+            let names = self.extract_account_names_from_expr(&init.expr);
+            if !names.is_empty() {
+                self.let_bindings.insert(var_name, names);
+            }
+        }
+        visit::visit_local(self, node);
+    }
+
     fn visit_expr_call(&mut self, node: &'ast syn::ExprCall) {
         let callee = normalize_tokens(&node.func.to_token_stream().to_string());
-        self.push_call(callee, node.span());
+        let cpi_account_names = if classify_call_kind(&callee) == CallKind::Cpi {
+            let mut found = vec![];
+            for arg in &node.args {
+                let names = self.extract_account_names_from_expr(arg);
+                if !names.is_empty() {
+                    found = names;
+                    break;
+                }
+            }
+            found
+        } else {
+            vec![]
+        };
+        self.push_call(callee, node.span(), cpi_account_names);
         visit::visit_expr_call(self, node);
     }
 
     fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
         let receiver = normalize_tokens(&node.receiver.to_token_stream().to_string());
         let callee = format!("{receiver}.{}", node.method);
-        self.push_call(callee, node.span());
+        self.push_call(callee, node.span(), vec![]);
         visit::visit_expr_method_call(self, node);
     }
 
@@ -408,6 +479,26 @@ fn is_assign_op(op: &syn::BinOp) -> bool {
 
 fn normalize_tokens(tokens: &str) -> String {
     tokens.split_whitespace().collect()
+}
+
+fn get_simple_pat_ident(pat: &syn::Pat) -> Option<String> {
+    if let syn::Pat::Ident(p) = pat {
+        Some(p.ident.to_string())
+    } else {
+        None
+    }
+}
+
+/// Extract an account name from an expression string by looking for `.accounts.IDENT`.
+/// Returns `None` when the expression doesn't reference `ctx.accounts`.
+fn extract_account_name_from_str(s: &str) -> Option<String> {
+    let pos = s.find(".accounts.")?;
+    let after = &s[pos + ".accounts.".len()..];
+    let ident: String = after
+        .chars()
+        .take_while(|c| c.is_alphanumeric() || *c == '_')
+        .collect();
+    if ident.is_empty() { None } else { Some(ident) }
 }
 
 #[cfg(test)]

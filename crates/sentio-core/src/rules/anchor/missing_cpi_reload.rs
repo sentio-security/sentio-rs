@@ -1,5 +1,5 @@
 use crate::finding::SourceLocation;
-use crate::instruction_analysis::{collect_instruction_index, CallKind};
+use crate::instruction_analysis::{collect_instruction_index, CallEvidence, CallKind, WriteEvidence};
 use crate::rules::{Rule, RuleContext, RuleMatch, RuleMetadata, RuleSeverity};
 use crate::syntax::ParsedFile;
 
@@ -23,66 +23,105 @@ impl Rule for MissingCpiReloadRule {
         let mut findings = Vec::new();
 
         for function in &index.functions {
+            // Exclude CpiContext builders — those are not invocations; the actual CPI
+            // call (e.g. `token::transfer`) appears separately and carries the resolved
+            // `cpi_account_names` from the builder's arguments.
             let cpi_calls: Vec<_> = function
                 .calls
                 .iter()
-                .filter(|c| c.kind == CallKind::Cpi)
+                .filter(|c| c.kind == CallKind::Cpi && !is_cpi_context_builder(&c.callee))
                 .collect();
 
             if cpi_calls.is_empty() {
                 continue;
             }
 
-            for cpi_call in cpi_calls {
-                // Look for a write after this CPI with no reload between them.
+            // Report at most one finding per function (the first unguarded CPI with a
+            // post-CPI write to an account that was part of that CPI).
+            let first_unguarded = cpi_calls.iter().find(|cpi_call| {
                 let has_write_after = function
                     .writes
                     .iter()
-                    .any(|w| w.order > cpi_call.order);
+                    .any(|w| w.order > cpi_call.order && write_concerns_cpi_account(w, cpi_call));
 
                 if !has_write_after {
-                    continue;
+                    return false;
                 }
 
-                // Check if a reload call exists between this CPI and the first subsequent write.
                 let first_write_order = function
                     .writes
                     .iter()
-                    .filter(|w| w.order > cpi_call.order)
+                    .filter(|w| w.order > cpi_call.order && write_concerns_cpi_account(w, cpi_call))
                     .map(|w| w.order)
                     .min()
                     .unwrap_or(usize::MAX);
 
-                let has_reload = function.calls.iter().any(|c| {
+                !function.calls.iter().any(|c| {
                     c.kind == CallKind::Reload
                         && c.order > cpi_call.order
                         && c.order < first_write_order
-                });
+                })
+            });
 
-                if !has_reload {
-                    findings.push(RuleMatch {
-                        rule_id: "SW008",
-                        severity: RuleSeverity::High,
-                        message: format!(
-                            "Function `{}` writes to an account after a CPI call to `{}` without reloading; account data may be stale.",
-                            function.name, cpi_call.callee
-                        ),
-                        location: SourceLocation {
-                            path: file.path.display().to_string(),
-                            line: cpi_call.span.start_line,
-                            column: cpi_call.span.start_column,
-                        },
-                        help: Some(
-                            "Call account.reload()? after the CPI to refresh account data before reading or writing."
-                                .to_string(),
-                        ),
-                    });
-                }
+            if let Some(cpi_call) = first_unguarded {
+                findings.push(RuleMatch {
+                    rule_id: "SW008",
+                    severity: RuleSeverity::High,
+                    message: format!(
+                        "Function `{}` writes to an account after a CPI call to `{}` without reloading; account data may be stale.",
+                        function.name, cpi_call.callee
+                    ),
+                    location: SourceLocation {
+                        path: file.path.display().to_string(),
+                        line: cpi_call.span.start_line,
+                        column: cpi_call.span.start_column,
+                    },
+                    help: Some(
+                        "Call account.reload()? after the CPI to refresh account data before reading or writing."
+                            .to_string(),
+                    ),
+                });
             }
         }
 
         findings
     }
+}
+
+fn is_cpi_context_builder(callee: &str) -> bool {
+    callee.contains("CpiContext::new")
+}
+
+/// Returns true when `write` targets an account that was part of `cpi_call`.
+///
+/// If `cpi_account_names` is empty (raw invoke / unresolvable binding) we fall
+/// back to flagging any field-access write (`target` contains `'.'`), which is
+/// the conservative pre-cross-reference behaviour.
+fn write_concerns_cpi_account(write: &WriteEvidence, cpi_call: &CallEvidence) -> bool {
+    if cpi_call.cpi_account_names.is_empty() {
+        return write.target.contains('.');
+    }
+    let account = extract_account_name_from_target(&write.target);
+    !account.is_empty() && cpi_call.cpi_account_names.contains(&account)
+}
+
+/// Extract the account name from a write target string.
+///
+/// - `ctx.accounts.vault.amount`  → `"vault"`
+/// - `vault.amount`               → `"vault"`
+/// - plain identifier             → `""`  (not a field write, ignore)
+fn extract_account_name_from_target(target: &str) -> String {
+    if let Some(pos) = target.find(".accounts.") {
+        let after = &target[pos + ".accounts.".len()..];
+        return after
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect();
+    }
+    if target.contains('.') {
+        return target.split('.').next().unwrap_or("").to_string();
+    }
+    String::new()
 }
 
 #[cfg(test)]

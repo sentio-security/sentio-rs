@@ -23,10 +23,12 @@ impl Rule for ArbitraryCpiRule {
         let mut findings = Vec::new();
 
         for function in &index.functions {
+            // Only flag raw invoke/invoke_signed — Anchor CpiContext calls are validated
+            // at the account struct level via Program<'info, T> (covered by SW020).
             let cpi_calls: Vec<_> = function
                 .calls
                 .iter()
-                .filter(|c| c.kind == CallKind::Cpi)
+                .filter(|c| c.kind == CallKind::Cpi && is_raw_invoke(&c.callee))
                 .collect();
 
             if cpi_calls.is_empty() {
@@ -64,6 +66,16 @@ impl Rule for ArbitraryCpiRule {
 
         findings
     }
+}
+
+fn is_raw_invoke(callee: &str) -> bool {
+    let n = callee.trim();
+    n == "invoke"
+        || n == "invoke_signed"
+        || n == "invoke_unchecked"
+        || n.ends_with("::invoke")
+        || n.ends_with("::invoke_signed")
+        || n.ends_with("::invoke_unchecked")
 }
 
 #[cfg(test)]
