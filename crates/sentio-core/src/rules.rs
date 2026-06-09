@@ -58,6 +58,9 @@ impl RuleRegistry {
             Box::new(anchor::missing_realloc_zero::MissingReallocZeroRule::default()),
             Box::new(anchor::account_info_as_data_account::AccountInfoAsDataAccountRule::default()),
             Box::new(anchor::account_info_as_cpi_program::AccountInfoAsCpiProgramRule::default()),
+            Box::new(anchor::missing_owner_check::MissingOwnerCheckRule::default()),
+            Box::new(anchor::arbitrary_cpi::ArbitraryCpiRule::default()),
+            Box::new(anchor::missing_cpi_reload::MissingCpiReloadRule::default()),
         ])
     }
 
