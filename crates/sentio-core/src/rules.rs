@@ -55,6 +55,9 @@ impl RuleRegistry {
         Self::new(vec![
             Box::new(anchor::missing_pda_seeds_bump::MissingPdaSeedsBumpRule::default()),
             Box::new(anchor::init_if_needed_usage::InitIfNeededUsageRule::default()),
+            Box::new(anchor::missing_realloc_zero::MissingReallocZeroRule::default()),
+            Box::new(anchor::account_info_as_data_account::AccountInfoAsDataAccountRule::default()),
+            Box::new(anchor::account_info_as_cpi_program::AccountInfoAsCpiProgramRule::default()),
         ])
     }
 
