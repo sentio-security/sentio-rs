@@ -2,7 +2,7 @@
 
 **AST-based security scanner for Solana/Anchor programs.**
 
-sentio scans Rust source files for common Solana vulnerability patterns using real AST analysis via [`syn`](https://docs.rs/syn) rather than regex. It understands Anchor account constraints, instruction logic, and CPI call graphs to produce high-signal findings with minimal false positives.
+sentio scans Rust source files for common Solana vulnerability patterns using [`syn`](https://docs.rs/syn) — Rust's macro-safe AST parser. It understands Anchor account constraints, instruction logic, and CPI call graphs to produce high-signal findings with minimal false positives.
 
 ---
 
@@ -159,7 +159,7 @@ The comment must appear on the same line as the flagged code.
 
 ## How It Works
 
-sentio's precision comes from a two-layer analysis pipeline built on top of `syn`, Rust's macro-safe AST parser. Unlike regex tools that match text patterns, sentio operates on the actual structure of your code.
+sentio's precision comes from a two-layer analysis pipeline built on top of `syn`, Rust's macro-safe AST parser. Every rule operates on the actual structure of the code — typed AST nodes, not source text.
 
 ### Layer 1 — Anchor Account Index
 
@@ -172,7 +172,7 @@ AccountInfo named "authority"
                 init: false, seeds: false, bump: false, ...
 ```
 
-This is built by `anchor_accounts.rs`, which uses `syn`'s meta parser to read every key inside `#[account(...)]` into a strongly-typed `AnchorFieldConstraints` struct. Every constraint — `mut`, `signer`, `has_one`, `seeds`, `bump`, `owner`, `address`, `init`, `init_if_needed`, `realloc`, `realloc::zero`, `close` — is parsed from the actual AST token stream, not guessed from source text.
+This is built by `anchor_accounts.rs`, which uses `syn`'s meta parser to read every key inside `#[account(...)]` into a strongly-typed `AnchorFieldConstraints` struct. Every constraint — `mut`, `signer`, `has_one`, `seeds`, `bump`, `owner`, `address`, `init`, `init_if_needed`, `realloc`, `realloc::zero`, `close` — is parsed from the AST token stream into a typed field on the struct.
 
 ### Layer 2 — Instruction Analysis Index
 
@@ -270,9 +270,9 @@ sentio-rs/
 
 ## Design Philosophy
 
-**Real AST, not regex.** Regex tools cannot distinguish `#[account(signer)]` from a comment that mentions the word "signer". sentio parses Rust source with `syn` — the same parser used by procedural macros — so every constraint, guard, and expression is a typed AST node.
+**Structured analysis.** sentio parses Rust source with `syn` — the same parser used by procedural macros — so every constraint, guard, and expression is a typed AST node. Rules ask "does this field have a `seeds` constraint with no `bump`?" against a structured model, not against source text.
 
-**Anchor-aware.** sentio models Anchor's `#[derive(Accounts)]` structs and their full constraint vocabulary. Rules can ask "does this field have a `seeds` constraint with no `bump`?" rather than grepping for the word seeds somewhere in the file.
+**Anchor-aware.** sentio models Anchor's `#[derive(Accounts)]` structs and their full constraint vocabulary — `signer`, `owner`, `address`, `has_one`, `seeds`, `bump`, `init_if_needed`, `realloc::zero`, and more. It also understands Anchor CPI patterns including `CpiContext::new` and account struct resolution.
 
 **Precision over recall.** A false positive wastes an auditor's time and erodes trust in the tool. Every rule ships with a real-program validation pass. When precision cannot be guaranteed, rules are flagged as `manual review` rather than treated as confirmed vulnerabilities.
 
