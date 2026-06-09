@@ -65,8 +65,18 @@ fn render_json(result: &sentio_core::ScanResult) -> Result<()> {
 }
 
 #[derive(Debug, Parser)]
-#[command(name = "sentio-rs")]
-#[command(about = "CLI scanner for common Solana program vulnerability patterns")]
+#[command(name = "sentio")]
+#[command(author = "Sentio Security")]
+#[command(version)]
+#[command(about = "AST-based security scanner for Solana/Anchor programs")]
+#[command(long_about = "sentio scans Rust source files in Solana programs for common vulnerability\n\
+patterns using real AST analysis (via syn) rather than regex. It understands\n\
+Anchor account constraints, instruction logic, and CPI call graphs to produce\n\
+high-signal findings with minimal false positives.\n\n\
+Exit codes:\n  \
+0  No findings\n  \
+1  One or more findings\n  \
+2  Parse error in one or more files")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -74,16 +84,25 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
+    /// Scan a Solana program directory or file for vulnerabilities
     Scan {
-        #[arg(default_value = ".")]
+        /// Path to the program directory or Rust source file to scan
+        #[arg(default_value = ".", value_name = "PATH")]
         path: String,
-        #[arg(long, value_enum, default_value_t = OutputFormat::Human)]
+
+        /// Output format
+        #[arg(long, value_enum, default_value_t = OutputFormat::Human, value_name = "FORMAT")]
         format: OutputFormat,
-        #[arg(long)]
+
+        /// Run only a specific rule (e.g. SW001, SW003). Run `sentio rules list` to see all rules.
+        #[arg(long, value_name = "RULE_ID")]
         rule: Option<String>,
+
+        /// Include test files in the scan (excluded by default to reduce noise)
         #[arg(long)]
         include_tests: bool,
     },
+    /// Manage and inspect the built-in rule set
     Rules {
         #[command(subcommand)]
         command: RulesCommands,
@@ -92,11 +111,14 @@ enum Commands {
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum OutputFormat {
+    /// Human-readable output with source excerpts and remediation guidance (default)
     Human,
+    /// Machine-readable JSON — useful for CI pipelines and tooling integrations
     Json,
 }
 
 #[derive(Debug, Subcommand)]
 enum RulesCommands {
+    /// Print all available rules with their IDs and titles
     List,
 }
