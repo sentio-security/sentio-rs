@@ -6,7 +6,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/sentio-security/sentio-rs"
@@ -14,6 +14,7 @@ authors = ["sentio-security"]
 description = "AST-based security scanner for Solana/Anchor programs"
 keywords = ["solana", "anchor", "security", "linter", "audit"]
 categories = ["development-tools::testing", "command-line-utilities"]
+readme = "README.md"
 
 [workspace.dependencies]
 anyhow = "1.0"
