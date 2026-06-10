@@ -70,7 +70,7 @@ fn render_json(result: &sentio_core::ScanResult) -> Result<()> {
 #[command(version)]
 #[command(about = "AST-based security scanner for Solana/Anchor programs")]
 #[command(long_about = "sentio scans Rust source files in Solana programs for common vulnerability\n\
-patterns using real AST analysis (via syn) rather than regex. It understands\n\
+patterns using syn — Rust's macro-safe AST parser. It understands\n\
 Anchor account constraints, instruction logic, and CPI call graphs to produce\n\
 high-signal findings with minimal false positives.\n\n\
 Exit codes:\n  \

@@ -11,6 +11,9 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/sentio-security/sentio-rs"
 authors = ["sentio-security"]
+description = "AST-based security scanner for Solana/Anchor programs"
+keywords = ["solana", "anchor", "security", "linter", "audit"]
+categories = ["development-tools::testing", "command-line-utilities"]
 
 [workspace.dependencies]
 anyhow = "1.0"
