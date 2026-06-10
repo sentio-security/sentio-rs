@@ -9,22 +9,20 @@ sentio scans Rust source files for common Solana vulnerability patterns using [`
 ## Quick Start
 
 ```bash
-# Clone and build
-git clone https://github.com/sentio-security/sentio-rs
-cd sentio-rs
-cargo build --release
+# Install
+cargo install sentio-cli
 
 # Scan your program
-./target/release/sentio scan /path/to/your/anchor-program
+sentio scan /path/to/your/anchor-program
 
 # Scan with JSON output (for CI pipelines)
-./target/release/sentio scan . --format json
+sentio scan . --format json
 
 # Run only one specific rule
-./target/release/sentio scan . --rule SW003
+sentio scan . --rule SW003
 
 # List all available rules
-./target/release/sentio rules list
+sentio rules list
 ```
 
 ---
