@@ -136,8 +136,9 @@ fn resolve_scan_roots(path: &str) -> (Vec<PathBuf>, Option<Vec<String>>) {
         .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
         .unwrap_or_default();
 
+    // No [workspace] section or empty members — fall back to programs/ convention
     if members.is_empty() {
-        return (vec![root], Some(vec![]));
+        return fallback_to_programs_dir(&root);
     }
 
     let mut roots: Vec<PathBuf> = Vec::new();
@@ -163,7 +164,37 @@ fn resolve_scan_roots(path: &str) -> (Vec<PathBuf>, Option<Vec<String>>) {
     }
 
     if roots.is_empty() {
-        return (vec![root], Some(vec![]));
+        return fallback_to_programs_dir(&root);
+    }
+
+    let names: Vec<String> = roots
+        .iter()
+        .filter_map(|r| r.file_name())
+        .map(|n| n.to_string_lossy().into_owned())
+        .collect();
+
+    (roots, Some(names))
+}
+
+/// Falls back to scanning `programs/` when Anchor.toml has no `[workspace] members`.
+/// This covers the majority of single-program Anchor projects.
+fn fallback_to_programs_dir(root: &Path) -> (Vec<PathBuf>, Option<Vec<String>>) {
+    let programs_dir = root.join("programs");
+    if !programs_dir.is_dir() {
+        return (vec![root.to_path_buf()], None);
+    }
+
+    let mut roots: Vec<PathBuf> = std::fs::read_dir(&programs_dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_dir() && p.join("Cargo.toml").exists())
+        .collect();
+    roots.sort();
+
+    if roots.is_empty() {
+        return (vec![root.to_path_buf()], None);
     }
 
     let names: Vec<String> = roots
