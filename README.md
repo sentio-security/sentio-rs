@@ -135,23 +135,37 @@ By rule:
 | SW001 | Missing signer check | Critical | `AccountInfo`/`UncheckedAccount` named as authority with no `#[account(signer)]` and no `is_signer` guard |
 | SW002 | Missing owner check | Critical | `AccountInfo`/`UncheckedAccount` with no `owner` or `address` constraint and no owner guard in handler |
 | SW003 | Arbitrary CPI target | Critical | Raw `invoke`/`invoke_signed` calls with no preceding program key validation |
+| SW005 | Unchecked arithmetic | High | `+`, `-`, `*`, `+=`, `-=`, `*=` on account fields with no checked math; can overflow in release builds |
+| SW006 | Type cosplay | Critical | `try_from_slice` without a discriminator check; a malicious account type can be deserialized as another |
 | SW008 | Missing post-CPI reload | High | Account written after a CPI that may have mutated it, without an intervening `reload()` |
+| SW009 | Missing token mint check | High | Mutable `TokenAccount` with no `token::mint` constraint and no `associated_token`, allowing wrong-mint deposits |
+| SW010 | Missing token owner check | High | Mutable `TokenAccount` with no `token::authority` or authority `has_one`, allowing unauthorized withdrawals |
 | SW011 | AccountInfo as data account | Medium | `AccountInfo` used where a typed `Account<'info, T>` is needed (init/has_one/seeds constraints present) |
 | SW012 | Missing seeds + bump on PDA | High | PDA accounts with `seeds` but no `bump`, skipping bump verification |
+| SW013 | PDA seed unvalidated account | High | PDA seeds reference an `AccountInfo`/`UncheckedAccount` sibling with no `owner`, `address`, or `signer` constraint |
+| SW014 | PDA bump not canonical | Medium | `bump = <bare_identifier>` uses a caller-supplied bump instead of Anchor's canonical derivation |
 | SW016 | init_if_needed usage | Medium | `init_if_needed` accounts that can be silently re-initialized, resetting state |
 | SW018 | Missing realloc::zero | Medium | `realloc` without `realloc::zero = true`, leaving stale data in reallocated memory |
 | SW020 | AccountInfo as CPI program | Medium | `AccountInfo` used as a CPI program account instead of typed `Program<'info, T>` |
 
 ### Inline Suppressions
 
-Suppress a specific finding on a line with a trailing comment:
+Suppress a finding on the same line:
 
 ```rust
 #[account(mut)] // sentio-ignore SW001
 pub authority: AccountInfo<'info>,
 ```
 
-The comment must appear on the same line as the flagged code.
+Suppress a finding on the next line:
+
+```rust
+// sentio-ignore-next-line SW001
+#[account(mut)]
+pub authority: AccountInfo<'info>,
+```
+
+Both forms accept a comma-separated list of rule IDs: `// sentio-ignore SW001, SW002`.
 
 ---
 
@@ -282,4 +296,4 @@ sentio-rs/
 
 sentio is under active development. The rule set is growing; the AST infrastructure is stable.
 
-**Planned:** SW005 (arithmetic overflow), SW006 (type cosplay), SW009/SW010 (token validation), SW013/SW014 (PDA seed issues).
+**15 rules ship today** covering the most common Solana/Anchor vulnerability classes. Native Solana (non-Anchor) rule support is on the roadmap.
