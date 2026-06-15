@@ -163,7 +163,7 @@ dependencies = [
 
 [[package]]
 name = "sentio-cli"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "clap",
@@ -173,7 +173,7 @@ dependencies = [
 
 [[package]]
 name = "sentio-core"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "proc-macro2",
  "quote",
