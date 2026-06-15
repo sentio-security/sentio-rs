@@ -99,7 +99,8 @@ mod tests {
 
     #[test]
     fn flags_bump_set_to_bare_identifier() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
             #[derive(Accounts)]
             pub struct UseVault<'info> {
@@ -107,9 +108,15 @@ mod tests {
                 pub vault: Account<'info, Vault>,
                 pub authority: Signer<'info>,
             }
-        "#);
+        "#,
+        );
         let rule = PdaBumpNotCanonicalRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].rule_id, "SW014");
         assert!(findings[0].message.contains("bump_seed"));
@@ -117,7 +124,8 @@ mod tests {
 
     #[test]
     fn does_not_flag_bare_bump_anchor_derives_canonical() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
             #[derive(Accounts)]
             pub struct UseVault<'info> {
@@ -125,15 +133,22 @@ mod tests {
                 pub vault: Account<'info, Vault>,
                 pub authority: Signer<'info>,
             }
-        "#);
+        "#,
+        );
         let rule = PdaBumpNotCanonicalRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert!(findings.is_empty());
     }
 
     #[test]
     fn does_not_flag_bump_read_from_stored_field() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
             #[derive(Accounts)]
             pub struct UseVault<'info> {
@@ -141,15 +156,22 @@ mod tests {
                 pub vault: Account<'info, Vault>,
                 pub authority: Signer<'info>,
             }
-        "#);
+        "#,
+        );
         let rule = PdaBumpNotCanonicalRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert!(findings.is_empty());
     }
 
     #[test]
     fn does_not_flag_init_without_explicit_bump() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
             #[derive(Accounts)]
             pub struct CreateVault<'info> {
@@ -159,9 +181,15 @@ mod tests {
                 pub authority: Signer<'info>,
                 pub system_program: Program<'info, System>,
             }
-        "#);
+        "#,
+        );
         let rule = PdaBumpNotCanonicalRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert!(findings.is_empty());
     }
 }

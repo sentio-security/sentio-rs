@@ -81,7 +81,8 @@ mod tests {
 
     #[test]
     fn flags_account_info_with_data_constraints() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
 
             #[derive(Accounts)]
@@ -90,17 +91,24 @@ mod tests {
                 pub vault: AccountInfo<'info>,
                 pub authority: Signer<'info>,
             }
-        "#);
+        "#,
+        );
 
         let rule = AccountInfoAsDataAccountRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].rule_id, "SW011");
     }
 
     #[test]
     fn does_not_flag_typed_account() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
 
             #[derive(Accounts)]
@@ -109,26 +117,39 @@ mod tests {
                 pub vault: Account<'info, Vault>,
                 pub authority: Signer<'info>,
             }
-        "#);
+        "#,
+        );
 
         let rule = AccountInfoAsDataAccountRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert!(findings.is_empty());
     }
 
     #[test]
     fn does_not_flag_bare_account_info_without_data_constraints() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
 
             #[derive(Accounts)]
             pub struct Example<'info> {
                 pub clock: AccountInfo<'info>,
             }
-        "#);
+        "#,
+        );
 
         let rule = AccountInfoAsDataAccountRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert!(findings.is_empty());
     }
 }

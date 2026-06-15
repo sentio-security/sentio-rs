@@ -21,9 +21,8 @@ fn formats_source_excerpt_with_highlighted_line() {
         "fn main() {\n    let a = 1;\n    let b = a + 1;\n}\n",
     );
 
-    let excerpt =
-        format_source_excerpt(path.to_str().expect("valid path"), 3, 9, 1, "33", false)
-            .expect("excerpt should be produced");
+    let excerpt = format_source_excerpt(path.to_str().expect("valid path"), 3, 9, 1, "33", false)
+        .expect("excerpt should be produced");
 
     assert!(excerpt.contains("  2|     let a = 1;"));
     assert!(excerpt.contains(" >3|     let b = a + 1;"));
@@ -64,11 +63,15 @@ fn renders_detailed_human_report() {
         .expect("report should render");
     let output = String::from_utf8(output).expect("utf8 output");
 
-    assert!(output.contains("==============FINDING 1: SW016 init_if_needed usage (manual review)=============="));
+    assert!(output.contains(
+        "==============FINDING 1: SW016 init_if_needed usage (manual review)=============="
+    ));
     assert!(output.contains("Severity: medium"));
     assert!(output.contains("Matched Because:"));
     assert!(output.contains("Source:"));
-    assert!(output.contains(" >4|     #[account(init_if_needed, payer = authority, space = 8 + Vault::LEN)]"));
+    assert!(output.contains(
+        " >4|     #[account(init_if_needed, payer = authority, space = 8 + Vault::LEN)]"
+    ));
     assert!(output.contains("-------- Summary --------"));
     assert!(output.contains("1  SW016 init_if_needed usage (manual review)"));
 

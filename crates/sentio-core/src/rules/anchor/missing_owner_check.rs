@@ -113,7 +113,8 @@ mod tests {
 
     #[test]
     fn flags_account_info_without_owner_check() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
 
             #[derive(Accounts)]
@@ -126,17 +127,24 @@ mod tests {
                 let data = ctx.accounts.vault.try_borrow_data()?;
                 Ok(())
             }
-        "#);
+        "#,
+        );
 
         let rule = MissingOwnerCheckRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].rule_id, "SW002");
     }
 
     #[test]
     fn does_not_flag_when_owner_constraint_present() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
 
             #[derive(Accounts)]
@@ -145,16 +153,23 @@ mod tests {
                 pub vault: AccountInfo<'info>,
                 pub authority: Signer<'info>,
             }
-        "#);
+        "#,
+        );
 
         let rule = MissingOwnerCheckRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert!(findings.is_empty());
     }
 
     #[test]
     fn does_not_flag_when_owner_guard_in_instruction() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
 
             #[derive(Accounts)]
@@ -170,16 +185,23 @@ mod tests {
                 );
                 Ok(())
             }
-        "#);
+        "#,
+        );
 
         let rule = MissingOwnerCheckRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert!(findings.is_empty());
     }
 
     #[test]
     fn does_not_flag_address_constrained_account() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
 
             #[derive(Accounts)]
@@ -188,10 +210,16 @@ mod tests {
                 pub vault: AccountInfo<'info>,
                 pub authority: Signer<'info>,
             }
-        "#);
+        "#,
+        );
 
         let rule = MissingOwnerCheckRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert!(findings.is_empty());
     }
 }

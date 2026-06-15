@@ -53,21 +53,21 @@ impl RuleRegistry {
 
     pub fn baseline() -> Self {
         Self::new(vec![
-            Box::new(anchor::missing_signer_check::MissingSignerCheckRule::default()),
-            Box::new(anchor::missing_pda_seeds_bump::MissingPdaSeedsBumpRule::default()),
-            Box::new(anchor::init_if_needed_usage::InitIfNeededUsageRule::default()),
-            Box::new(anchor::missing_realloc_zero::MissingReallocZeroRule::default()),
-            Box::new(anchor::account_info_as_data_account::AccountInfoAsDataAccountRule::default()),
-            Box::new(anchor::account_info_as_cpi_program::AccountInfoAsCpiProgramRule::default()),
-            Box::new(anchor::missing_owner_check::MissingOwnerCheckRule::default()),
-            Box::new(anchor::arbitrary_cpi::ArbitraryCpiRule::default()),
-            Box::new(anchor::missing_cpi_reload::MissingCpiReloadRule::default()),
-            Box::new(anchor::unchecked_arithmetic::UncheckedArithmeticRule::default()),
-            Box::new(anchor::type_cosplay::TypeCosplayRule::default()),
-            Box::new(anchor::missing_token_mint_check::MissingTokenMintCheckRule::default()),
-            Box::new(anchor::missing_token_owner_check::MissingTokenOwnerCheckRule::default()),
-            Box::new(anchor::pda_seed_unvalidated_account::PdaSeedUnvalidatedAccountRule::default()),
-            Box::new(anchor::pda_bump_not_canonical::PdaBumpNotCanonicalRule::default()),
+            Box::new(anchor::missing_signer_check::MissingSignerCheckRule),
+            Box::new(anchor::missing_pda_seeds_bump::MissingPdaSeedsBumpRule),
+            Box::new(anchor::init_if_needed_usage::InitIfNeededUsageRule),
+            Box::new(anchor::missing_realloc_zero::MissingReallocZeroRule),
+            Box::new(anchor::account_info_as_data_account::AccountInfoAsDataAccountRule),
+            Box::new(anchor::account_info_as_cpi_program::AccountInfoAsCpiProgramRule),
+            Box::new(anchor::missing_owner_check::MissingOwnerCheckRule),
+            Box::new(anchor::arbitrary_cpi::ArbitraryCpiRule),
+            Box::new(anchor::missing_cpi_reload::MissingCpiReloadRule),
+            Box::new(anchor::unchecked_arithmetic::UncheckedArithmeticRule),
+            Box::new(anchor::type_cosplay::TypeCosplayRule),
+            Box::new(anchor::missing_token_mint_check::MissingTokenMintCheckRule),
+            Box::new(anchor::missing_token_owner_check::MissingTokenOwnerCheckRule),
+            Box::new(anchor::pda_seed_unvalidated_account::PdaSeedUnvalidatedAccountRule),
+            Box::new(anchor::pda_bump_not_canonical::PdaBumpNotCanonicalRule),
         ])
     }
 
@@ -84,9 +84,9 @@ impl RuleRegistry {
             .iter()
             .map(|rule| rule.as_ref())
             .filter(|rule| {
-                filter
-                    .as_ref()
-                    .map_or(true, |filter| rule.metadata().id.eq_ignore_ascii_case(filter))
+                filter.as_ref().is_none_or(|filter| {
+                    rule.metadata().id.eq_ignore_ascii_case(filter)
+                })
             })
             .collect()
     }
@@ -178,9 +178,7 @@ fn parse_ignore_directive(line: &str, directive: &str) -> Option<Vec<String>> {
 }
 
 fn is_rule_id(id: &str) -> bool {
-    id.len() == 5
-        && id.starts_with("SW")
-        && id[2..].chars().all(|c| c.is_ascii_digit())
+    id.len() == 5 && id.starts_with("SW") && id[2..].chars().all(|c| c.is_ascii_digit())
 }
 
 #[cfg(test)]

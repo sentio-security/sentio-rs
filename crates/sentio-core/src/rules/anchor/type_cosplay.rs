@@ -25,7 +25,9 @@ impl Rule for TypeCosplayRule {
     }
 
     fn match_file(&self, file: &ParsedFile, _ctx: &RuleContext<'_>) -> Vec<RuleMatch> {
-        let mut collector = TypeCosplayCollector { findings: Vec::new() };
+        let mut collector = TypeCosplayCollector {
+            findings: Vec::new(),
+        };
         visit::visit_file(&mut collector, &file.syntax);
 
         collector
@@ -106,36 +108,51 @@ mod tests {
 
     #[test]
     fn flags_try_from_slice_without_discriminator_skip() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
             pub fn handler(ctx: Context<Process>) -> Result<()> {
                 let data = VaultData::try_from_slice(&ctx.accounts.raw.data.borrow())?;
                 Ok(())
             }
-        "#);
+        "#,
+        );
         let rule = TypeCosplayRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].rule_id, "SW006");
     }
 
     #[test]
     fn does_not_flag_try_from_slice_with_discriminator_skip() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
             pub fn handler(ctx: Context<Process>) -> Result<()> {
                 let data = VaultData::try_from_slice(&ctx.accounts.raw.data.borrow()[8..])?;
                 Ok(())
             }
-        "#);
+        "#,
+        );
         let rule = TypeCosplayRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert!(findings.is_empty());
     }
 
     #[test]
     fn does_not_flag_typed_account_with_no_manual_deserialization() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
             #[derive(Accounts)]
             pub struct Process<'info> {
@@ -146,24 +163,37 @@ mod tests {
                 msg!("{}", ctx.accounts.vault.balance);
                 Ok(())
             }
-        "#);
+        "#,
+        );
         let rule = TypeCosplayRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert!(findings.is_empty());
     }
 
     #[test]
     fn does_not_flag_anchor_try_deserialize() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
             pub fn handler(ctx: Context<Process>) -> Result<()> {
                 let mut data: &[u8] = &ctx.accounts.raw.data.borrow();
                 let account = VaultData::try_deserialize(&mut data)?;
                 Ok(())
             }
-        "#);
+        "#,
+        );
         let rule = TypeCosplayRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert!(findings.is_empty());
     }
 }

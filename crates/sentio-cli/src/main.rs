@@ -20,9 +20,17 @@ fn run() -> Result<i32> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Scan { path, format, rule, include_tests } => {
+        Commands::Scan {
+            path,
+            format,
+            rule,
+            include_tests,
+        } => {
             let scanner = Scanner::new();
-            let options = ScanOptions { include_tests, rule_filter: rule };
+            let options = ScanOptions {
+                include_tests,
+                rule_filter: rule,
+            };
             let result = scanner.scan_path(&path, &options);
 
             match format {
@@ -38,7 +46,9 @@ fn run() -> Result<i32> {
                 1
             })
         }
-        Commands::Rules { command: RulesCommands::List } => render_rule_list(),
+        Commands::Rules {
+            command: RulesCommands::List,
+        } => render_rule_list(),
     }
 }
 
@@ -69,14 +79,16 @@ fn render_json(result: &sentio_core::ScanResult) -> Result<()> {
 #[command(author = "Sentio Security")]
 #[command(version)]
 #[command(about = "AST-based security scanner for Solana/Anchor programs")]
-#[command(long_about = "sentio scans Rust source files in Solana programs for common vulnerability\n\
+#[command(
+    long_about = "sentio scans Rust source files in Solana programs for common vulnerability\n\
 patterns using syn — Rust's macro-safe AST parser. It understands\n\
 Anchor account constraints, instruction logic, and CPI call graphs to produce\n\
 high-signal findings with minimal false positives.\n\n\
 Exit codes:\n  \
 0  No findings\n  \
 1  One or more findings\n  \
-2  Parse error in one or more files")]
+2  Parse error in one or more files"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,

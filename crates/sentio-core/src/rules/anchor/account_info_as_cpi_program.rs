@@ -87,7 +87,8 @@ mod tests {
 
     #[test]
     fn flags_account_info_named_program() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
 
             #[derive(Accounts)]
@@ -95,17 +96,24 @@ mod tests {
                 pub token_program: AccountInfo<'info>,
                 pub authority: Signer<'info>,
             }
-        "#);
+        "#,
+        );
 
         let rule = AccountInfoAsCpiProgramRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].rule_id, "SW020");
     }
 
     #[test]
     fn does_not_flag_typed_program() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
 
             #[derive(Accounts)]
@@ -113,26 +121,39 @@ mod tests {
                 pub token_program: Program<'info, Token>,
                 pub authority: Signer<'info>,
             }
-        "#);
+        "#,
+        );
 
         let rule = AccountInfoAsCpiProgramRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert!(findings.is_empty());
     }
 
     #[test]
     fn does_not_flag_account_info_without_program_in_name() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
 
             #[derive(Accounts)]
             pub struct Example<'info> {
                 pub clock: AccountInfo<'info>,
             }
-        "#);
+        "#,
+        );
 
         let rule = AccountInfoAsCpiProgramRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert!(findings.is_empty());
     }
 }

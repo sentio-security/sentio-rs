@@ -60,7 +60,12 @@ impl Scanner {
         let ctx = RuleContext { files };
         let suppressions: Vec<(String, SuppressionSet)> = files
             .iter()
-            .map(|file| (file.path.display().to_string(), SuppressionSet::from_source(&file.source)))
+            .map(|file| {
+                (
+                    file.path.display().to_string(),
+                    SuppressionSet::from_source(&file.source),
+                )
+            })
             .collect();
 
         let mut findings = Vec::new();

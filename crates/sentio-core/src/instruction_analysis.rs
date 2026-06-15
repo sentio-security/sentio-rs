@@ -96,7 +96,8 @@ impl<'ast> Visit<'ast> for InstructionCollector {
     }
 
     fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
-        self.impl_stack.push(node.self_ty.to_token_stream().to_string());
+        self.impl_stack
+            .push(node.self_ty.to_token_stream().to_string());
         visit::visit_item_impl(self, node);
         self.impl_stack.pop();
     }
@@ -155,7 +156,12 @@ impl FunctionBodyCollector {
 
     fn push_guard(&mut self, kind: GuardKind, expression: syn::Expr) {
         let features = ExprFeatures::from_expr(&expression);
-        self.push_guard_text(kind, expression.to_token_stream().to_string(), expression.span(), features);
+        self.push_guard_text(
+            kind,
+            expression.to_token_stream().to_string(),
+            expression.span(),
+            features,
+        );
     }
 
     fn push_guard_text(
@@ -177,7 +183,12 @@ impl FunctionBodyCollector {
         });
     }
 
-    fn push_call(&mut self, callee: String, span: proc_macro2::Span, cpi_account_names: Vec<String>) {
+    fn push_call(
+        &mut self,
+        callee: String,
+        span: proc_macro2::Span,
+        cpi_account_names: Vec<String>,
+    ) {
         let order = self.order();
         self.calls.push(CallEvidence {
             kind: classify_call_kind(&callee),
@@ -307,13 +318,19 @@ impl<'ast> Visit<'ast> for FunctionBodyCollector {
     }
 
     fn visit_expr_assign(&mut self, node: &'ast syn::ExprAssign) {
-        self.push_write(normalize_tokens(&node.left.to_token_stream().to_string()), node.span());
+        self.push_write(
+            normalize_tokens(&node.left.to_token_stream().to_string()),
+            node.span(),
+        );
         visit::visit_expr_assign(self, node);
     }
 
     fn visit_expr_binary(&mut self, node: &'ast syn::ExprBinary) {
         if is_assign_op(&node.op) {
-            self.push_write(normalize_tokens(&node.left.to_token_stream().to_string()), node.span());
+            self.push_write(
+                normalize_tokens(&node.left.to_token_stream().to_string()),
+                node.span(),
+            );
         }
 
         visit::visit_expr_binary(self, node);
@@ -397,7 +414,10 @@ fn parse_macro_guard_args(tokens: &proc_macro2::TokenStream) -> Option<Vec<syn::
     Some(args.into_iter().collect())
 }
 
-fn macro_guard_payload(path: &syn::Path, tokens: &proc_macro2::TokenStream) -> Option<(String, ExprFeatures)> {
+fn macro_guard_payload(
+    path: &syn::Path,
+    tokens: &proc_macro2::TokenStream,
+) -> Option<(String, ExprFeatures)> {
     let args = parse_macro_guard_args(tokens)?;
     if args.is_empty() {
         return None;
@@ -498,7 +518,11 @@ fn extract_account_name_from_str(s: &str) -> Option<String> {
         .chars()
         .take_while(|c| c.is_alphanumeric() || *c == '_')
         .collect();
-    if ident.is_empty() { None } else { Some(ident) }
+    if ident.is_empty() {
+        None
+    } else {
+        Some(ident)
+    }
 }
 
 #[cfg(test)]
@@ -561,15 +585,16 @@ mod tests {
         assert!(function.guards.iter().any(|guard| guard.references_key));
 
         assert!(function.calls.iter().any(|call| {
-            call.kind == CallKind::Deserialization
-                && call.callee.contains("Vault::try_deserialize")
+            call.kind == CallKind::Deserialization && call.callee.contains("Vault::try_deserialize")
         }));
-        assert!(function.calls.iter().any(|call| {
-            call.kind == CallKind::Cpi && call.callee.contains("invoke_signed")
-        }));
-        assert!(function.calls.iter().any(|call| {
-            call.kind == CallKind::Reload && call.callee.contains("state.reload")
-        }));
+        assert!(function
+            .calls
+            .iter()
+            .any(|call| { call.kind == CallKind::Cpi && call.callee.contains("invoke_signed") }));
+        assert!(function
+            .calls
+            .iter()
+            .any(|call| { call.kind == CallKind::Reload && call.callee.contains("state.reload") }));
 
         assert!(function
             .writes

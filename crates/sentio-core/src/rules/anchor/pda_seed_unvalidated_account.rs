@@ -70,8 +70,7 @@ impl Rule for PdaSeedUnvalidatedAccountRule {
                         );
 
                     if unverified && !has_validation {
-                        let pda_name =
-                            pda_field.ast.name.clone().unwrap_or_default();
+                        let pda_name = pda_field.ast.name.clone().unwrap_or_default();
                         findings.push(RuleMatch {
                             rule_id: "SW013",
                             severity: RuleSeverity::High,
@@ -122,7 +121,8 @@ mod tests {
 
     #[test]
     fn flags_pda_seeded_with_unvalidated_account_info() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
             #[derive(Accounts)]
             pub struct Create<'info> {
@@ -132,9 +132,15 @@ mod tests {
                 pub vault: Account<'info, Vault>,
                 pub authority: Signer<'info>,
             }
-        "#);
+        "#,
+        );
         let rule = PdaSeedUnvalidatedAccountRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].rule_id, "SW013");
         assert!(findings[0].message.contains("user"));
@@ -142,7 +148,8 @@ mod tests {
 
     #[test]
     fn does_not_flag_pda_seeded_with_signer() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
             #[derive(Accounts)]
             pub struct Create<'info> {
@@ -150,15 +157,22 @@ mod tests {
                 #[account(seeds = [b"vault", authority.key().as_ref()], bump)]
                 pub vault: Account<'info, Vault>,
             }
-        "#);
+        "#,
+        );
         let rule = PdaSeedUnvalidatedAccountRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert!(findings.is_empty());
     }
 
     #[test]
     fn does_not_flag_pda_seeded_with_owner_constrained_account() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
             #[derive(Accounts)]
             pub struct Create<'info> {
@@ -168,15 +182,22 @@ mod tests {
                 pub vault: Account<'info, Vault>,
                 pub authority: Signer<'info>,
             }
-        "#);
+        "#,
+        );
         let rule = PdaSeedUnvalidatedAccountRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert!(findings.is_empty());
     }
 
     #[test]
     fn does_not_flag_pda_with_only_literal_seeds() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
             #[derive(Accounts)]
             pub struct Create<'info> {
@@ -184,9 +205,15 @@ mod tests {
                 pub config: Account<'info, Config>,
                 pub authority: Signer<'info>,
             }
-        "#);
+        "#,
+        );
         let rule = PdaSeedUnvalidatedAccountRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert!(findings.is_empty());
     }
 }

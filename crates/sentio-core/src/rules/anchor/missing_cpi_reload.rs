@@ -1,5 +1,7 @@
 use crate::finding::SourceLocation;
-use crate::instruction_analysis::{collect_instruction_index, CallEvidence, CallKind, WriteEvidence};
+use crate::instruction_analysis::{
+    collect_instruction_index, CallEvidence, CallKind, WriteEvidence,
+};
 use crate::rules::{Rule, RuleContext, RuleMatch, RuleMetadata, RuleSeverity};
 use crate::syntax::ParsedFile;
 
@@ -141,7 +143,8 @@ mod tests {
 
     #[test]
     fn flags_write_after_cpi_without_reload() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
             use solana_program::program::invoke_signed;
 
@@ -150,17 +153,24 @@ mod tests {
                 ctx.accounts.vault.balance = 100;
                 Ok(())
             }
-        "#);
+        "#,
+        );
 
         let rule = MissingCpiReloadRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].rule_id, "SW008");
     }
 
     #[test]
     fn does_not_flag_when_reload_between_cpi_and_write() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
             use solana_program::program::invoke_signed;
 
@@ -170,16 +180,23 @@ mod tests {
                 ctx.accounts.vault.balance = 100;
                 Ok(())
             }
-        "#);
+        "#,
+        );
 
         let rule = MissingCpiReloadRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert!(findings.is_empty());
     }
 
     #[test]
     fn does_not_flag_cpi_with_no_subsequent_writes() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
             use solana_program::program::invoke_signed;
 
@@ -187,10 +204,16 @@ mod tests {
                 invoke_signed(&ix, &accounts, &seeds)?;
                 Ok(())
             }
-        "#);
+        "#,
+        );
 
         let rule = MissingCpiReloadRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert!(findings.is_empty());
     }
 }

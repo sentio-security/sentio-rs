@@ -95,7 +95,8 @@ mod tests {
 
     #[test]
     fn flags_cpi_without_key_check() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
             use solana_program::program::invoke;
 
@@ -106,17 +107,24 @@ mod tests {
                 )?;
                 Ok(())
             }
-        "#);
+        "#,
+        );
 
         let rule = ArbitraryCpiRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].rule_id, "SW003");
     }
 
     #[test]
     fn does_not_flag_cpi_with_key_check_before() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
             use solana_program::program::invoke;
 
@@ -131,26 +139,39 @@ mod tests {
                 )?;
                 Ok(())
             }
-        "#);
+        "#,
+        );
 
         let rule = ArbitraryCpiRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert!(findings.is_empty());
     }
 
     #[test]
     fn does_not_flag_function_with_no_cpi() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
 
             pub fn handler(ctx: Context<Example>) -> Result<()> {
                 ctx.accounts.vault.balance = 100;
                 Ok(())
             }
-        "#);
+        "#,
+        );
 
         let rule = ArbitraryCpiRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert!(findings.is_empty());
     }
 }

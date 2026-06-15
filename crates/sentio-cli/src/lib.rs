@@ -13,7 +13,11 @@ pub fn render_human_report<W: Write>(
         writeln!(
             writer,
             "{}",
-            colorize("==============PARSE FAILURES==============", "1;31", use_color)
+            colorize(
+                "==============PARSE FAILURES==============",
+                "1;31",
+                use_color
+            )
         )?;
         for failure in &result.parse_failures {
             writeln!(writer, "{}\n  {}", failure.path, failure.message)?;
@@ -70,7 +74,11 @@ pub fn render_human_report<W: Write>(
             writeln!(writer)?;
         }
 
-        writeln!(writer, "{}", colorize("Matched Because:", "1;36", use_color))?;
+        writeln!(
+            writer,
+            "{}",
+            colorize("Matched Because:", "1;36", use_color)
+        )?;
         writeln!(writer, "  {}", finding.message)?;
         writeln!(writer)?;
 
@@ -119,12 +127,12 @@ pub fn format_source_excerpt(
     let width = (end + 1).to_string().len();
     let mut output = String::new();
 
-    for current in start..=end {
+    for (current, line_str) in lines.iter().enumerate().take(end + 1).skip(start) {
         let marker = if current == hit_index { '>' } else { ' ' };
         let source_line = format!(
             " {marker}{:>width$}| {}\n",
             current + 1,
-            lines[current],
+            line_str,
             width = width
         );
 
@@ -171,7 +179,11 @@ fn write_summary<W: Write>(
         }
     }
 
-    writeln!(writer, "{}", colorize("-------- Summary --------", "1;36", use_color))?;
+    writeln!(
+        writer,
+        "{}",
+        colorize("-------- Summary --------", "1;36", use_color)
+    )?;
     writeln!(writer, "Total findings: {}", result.findings.len())?;
     writeln!(
         writer,

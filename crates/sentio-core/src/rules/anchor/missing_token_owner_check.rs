@@ -1,4 +1,6 @@
-use crate::anchor_accounts::{collect_anchor_accounts_index, AnchorAccountsField, AnchorFieldTypeKind};
+use crate::anchor_accounts::{
+    collect_anchor_accounts_index, AnchorAccountsField, AnchorFieldTypeKind,
+};
 use crate::finding::SourceLocation;
 use crate::rules::{Rule, RuleContext, RuleMatch, RuleMetadata, RuleSeverity};
 use crate::syntax::ParsedFile;
@@ -109,7 +111,8 @@ mod tests {
 
     #[test]
     fn flags_mut_token_account_without_authority_constraint() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
             use anchor_spl::token::{Mint, TokenAccount};
 
@@ -120,16 +123,23 @@ mod tests {
                 pub mint: Account<'info, Mint>,
                 pub authority: Signer<'info>,
             }
-        "#);
+        "#,
+        );
         let rule = MissingTokenOwnerCheckRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].rule_id, "SW010");
     }
 
     #[test]
     fn does_not_flag_when_token_authority_constraint_present() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
             use anchor_spl::token::{Mint, TokenAccount};
 
@@ -140,15 +150,22 @@ mod tests {
                 pub mint: Account<'info, Mint>,
                 pub authority: Signer<'info>,
             }
-        "#);
+        "#,
+        );
         let rule = MissingTokenOwnerCheckRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert!(findings.is_empty());
     }
 
     #[test]
     fn does_not_flag_associated_token_account() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
             use anchor_spl::token::TokenAccount;
 
@@ -158,15 +175,22 @@ mod tests {
                 pub from: Account<'info, TokenAccount>,
                 pub authority: Signer<'info>,
             }
-        "#);
+        "#,
+        );
         let rule = MissingTokenOwnerCheckRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert!(findings.is_empty());
     }
 
     #[test]
     fn does_not_flag_has_one_authority() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
             use anchor_spl::token::{Mint, TokenAccount};
 
@@ -177,15 +201,22 @@ mod tests {
                 pub mint: Account<'info, Mint>,
                 pub authority: Signer<'info>,
             }
-        "#);
+        "#,
+        );
         let rule = MissingTokenOwnerCheckRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert!(findings.is_empty());
     }
 
     #[test]
     fn does_not_flag_read_only_token_account() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
             use anchor_spl::token::TokenAccount;
 
@@ -194,9 +225,15 @@ mod tests {
                 pub token_account: Account<'info, TokenAccount>,
                 pub authority: Signer<'info>,
             }
-        "#);
+        "#,
+        );
         let rule = MissingTokenOwnerCheckRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert!(findings.is_empty());
     }
 }

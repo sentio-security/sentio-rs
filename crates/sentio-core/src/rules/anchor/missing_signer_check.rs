@@ -78,8 +78,7 @@ impl Rule for MissingSignerCheckRule {
                 }
 
                 // Explicit is_signer guard in any instruction handler body.
-                let has_signer_guard =
-                    signer_guarded_tokens.iter().any(|tok| tok == &field_name);
+                let has_signer_guard = signer_guarded_tokens.iter().any(|tok| tok == &field_name);
 
                 if !has_signer_guard {
                     findings.push(RuleMatch {
@@ -123,7 +122,8 @@ mod tests {
 
     #[test]
     fn flags_account_info_authority_without_signer_check() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
 
             #[derive(Accounts)]
@@ -138,17 +138,24 @@ mod tests {
                 ctx.accounts.vault.balance += 1;
                 Ok(())
             }
-        "#);
+        "#,
+        );
 
         let rule = MissingSignerCheckRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].rule_id, "SW001");
     }
 
     #[test]
     fn does_not_flag_when_signer_constraint_present() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
 
             #[derive(Accounts)]
@@ -158,16 +165,23 @@ mod tests {
                 #[account(mut)]
                 pub vault: Account<'info, Vault>,
             }
-        "#);
+        "#,
+        );
 
         let rule = MissingSignerCheckRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert!(findings.is_empty());
     }
 
     #[test]
     fn does_not_flag_when_is_signer_guard_in_instruction() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
 
             #[derive(Accounts)]
@@ -186,16 +200,23 @@ mod tests {
                 ctx.accounts.vault.balance += 1;
                 Ok(())
             }
-        "#);
+        "#,
+        );
 
         let rule = MissingSignerCheckRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert!(findings.is_empty());
     }
 
     #[test]
     fn does_not_flag_signer_type() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
 
             #[derive(Accounts)]
@@ -204,16 +225,23 @@ mod tests {
                 #[account(mut)]
                 pub vault: Account<'info, Vault>,
             }
-        "#);
+        "#,
+        );
 
         let rule = MissingSignerCheckRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert!(findings.is_empty());
     }
 
     #[test]
     fn does_not_flag_non_authority_named_account_info() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
 
             #[derive(Accounts)]
@@ -221,10 +249,16 @@ mod tests {
                 pub treasury: AccountInfo<'info>,
                 pub vault: AccountInfo<'info>,
             }
-        "#);
+        "#,
+        );
 
         let rule = MissingSignerCheckRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert!(findings.is_empty());
     }
 }

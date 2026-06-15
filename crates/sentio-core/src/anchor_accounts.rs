@@ -4,7 +4,9 @@ use serde::Serialize;
 use syn::ext::IdentExt;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
-use syn::{Attribute, Expr, GenericArgument, Item, ItemStruct, Path, PathArguments, Type, TypePath};
+use syn::{
+    Attribute, Expr, GenericArgument, Item, ItemStruct, Path, PathArguments, Type, TypePath,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AnchorAccountsIndex {
@@ -118,10 +120,10 @@ pub fn collect_anchor_accounts_index(file: &syn::File) -> AnchorAccountsIndex {
 fn collect_accounts_structs(items: &[Item], structs: &mut Vec<AnchorAccountsStruct>) {
     for item in items {
         match item {
-            Item::Struct(item_struct) => {
-                if has_anchor_accounts_derive(&item_struct.attrs) {
-                    structs.push(collect_accounts_struct(item_struct));
-                }
+            Item::Struct(item_struct)
+                if has_anchor_accounts_derive(&item_struct.attrs) =>
+            {
+                structs.push(collect_accounts_struct(item_struct));
             }
             Item::Mod(module) => {
                 if let Some((_, nested_items)) = &module.content {
@@ -477,15 +479,27 @@ mod tests {
 
         assert_eq!(fields[0].type_info.kind, AnchorFieldTypeKind::Account);
         assert_eq!(fields[1].type_info.kind, AnchorFieldTypeKind::AccountLoader);
-        assert_eq!(fields[2].type_info.kind, AnchorFieldTypeKind::InterfaceAccount);
+        assert_eq!(
+            fields[2].type_info.kind,
+            AnchorFieldTypeKind::InterfaceAccount
+        );
         assert_eq!(fields[3].type_info.kind, AnchorFieldTypeKind::Program);
         assert_eq!(fields[4].type_info.kind, AnchorFieldTypeKind::Signer);
         assert_eq!(fields[5].type_info.kind, AnchorFieldTypeKind::SystemAccount);
-        assert_eq!(fields[6].type_info.kind, AnchorFieldTypeKind::UncheckedAccount);
+        assert_eq!(
+            fields[6].type_info.kind,
+            AnchorFieldTypeKind::UncheckedAccount
+        );
         assert_eq!(fields[7].type_info.kind, AnchorFieldTypeKind::Account);
-        assert_eq!(fields[7].type_info.wrappers[0].kind, AnchorTypeWrapperKind::Box);
+        assert_eq!(
+            fields[7].type_info.wrappers[0].kind,
+            AnchorTypeWrapperKind::Box
+        );
         assert_eq!(fields[8].type_info.kind, AnchorFieldTypeKind::AccountInfo);
-        assert_eq!(fields[8].type_info.wrappers[0].kind, AnchorTypeWrapperKind::Ref);
+        assert_eq!(
+            fields[8].type_info.wrappers[0].kind,
+            AnchorTypeWrapperKind::Ref
+        );
     }
 
     #[test]
@@ -520,7 +534,10 @@ mod tests {
         assert!(constraints.realloc);
         assert!(constraints.realloc_zero);
         assert!(constraints.close);
-        assert!(constraints.items.iter().any(|item| item.kind == AnchorConstraintKind::Mut));
+        assert!(constraints
+            .items
+            .iter()
+            .any(|item| item.kind == AnchorConstraintKind::Mut));
         assert!(constraints.items.iter().any(|item| {
             item.path == "constraint"
                 && item
@@ -532,6 +549,9 @@ mod tests {
             .items
             .iter()
             .any(|item| item.path == "has_one" && item.value.as_deref() == Some("authority")));
-        assert!(constraints.items.iter().any(|item| item.path == "realloc::zero"));
+        assert!(constraints
+            .items
+            .iter()
+            .any(|item| item.path == "realloc::zero"));
     }
 }

@@ -30,7 +30,8 @@ fn scan_reports_parse_failures() {
     write_file(&dir.join("src/lib.rs"), "pub fn ok() {}\n");
     write_file(&dir.join("src/broken.rs"), "pub fn broken( {}\n");
 
-    let result = Scanner::new().scan_path(dir.to_str().expect("valid path"), &ScanOptions::default());
+    let result =
+        Scanner::new().scan_path(dir.to_str().expect("valid path"), &ScanOptions::default());
 
     assert_eq!(result.files_scanned, 2);
     assert_eq!(result.files_parsed, 1);
@@ -45,7 +46,8 @@ fn scan_skips_test_files_by_default() {
     write_file(&dir.join("src/lib.rs"), "pub fn ok() {}\n");
     write_file(&dir.join("tests/broken.rs"), "pub fn broken( {}\n");
 
-    let result = Scanner::new().scan_path(dir.to_str().expect("valid path"), &ScanOptions::default());
+    let result =
+        Scanner::new().scan_path(dir.to_str().expect("valid path"), &ScanOptions::default());
 
     assert_eq!(result.files_scanned, 1);
     assert_eq!(result.files_parsed, 1);
@@ -53,4 +55,3 @@ fn scan_skips_test_files_by_default() {
 
     fs::remove_dir_all(dir).expect("temp dir should be removed");
 }
-

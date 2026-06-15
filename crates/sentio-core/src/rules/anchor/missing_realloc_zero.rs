@@ -67,7 +67,8 @@ mod tests {
 
     #[test]
     fn flags_realloc_without_zero() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
 
             #[derive(Accounts)]
@@ -76,17 +77,24 @@ mod tests {
                 pub data: Account<'info, Data>,
                 pub authority: Signer<'info>,
             }
-        "#);
+        "#,
+        );
 
         let rule = MissingReallocZeroRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].rule_id, "SW018");
     }
 
     #[test]
     fn does_not_flag_realloc_with_zero() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
 
             #[derive(Accounts)]
@@ -95,16 +103,23 @@ mod tests {
                 pub data: Account<'info, Data>,
                 pub authority: Signer<'info>,
             }
-        "#);
+        "#,
+        );
 
         let rule = MissingReallocZeroRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert!(findings.is_empty());
     }
 
     #[test]
     fn does_not_flag_account_without_realloc() {
-        let file = parse_file(r#"
+        let file = parse_file(
+            r#"
             use anchor_lang::prelude::*;
 
             #[derive(Accounts)]
@@ -112,10 +127,16 @@ mod tests {
                 #[account(mut)]
                 pub data: Account<'info, Data>,
             }
-        "#);
+        "#,
+        );
 
         let rule = MissingReallocZeroRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert!(findings.is_empty());
     }
 }
