@@ -1,6 +1,6 @@
 # sentio
 
-**AST-based security scanner for Solana/Anchor programs.**
+**AST-based security scanner for Anchor programs.**
 
 sentio scans Rust source files for common Solana vulnerability patterns using [`syn`](https://docs.rs/syn) — Rust's macro-safe AST parser. It understands Anchor account constraints, instruction logic, and CPI call graphs to produce high-signal findings with minimal false positives.
 
