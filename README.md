@@ -18,6 +18,9 @@ sentio scan /path/to/your/anchor-program
 # Scan with JSON output (for CI pipelines)
 sentio scan . --format json
 
+# Export findings to a JSON file (pipe to AI or tooling)
+sentio scan . --format json --output report.json
+
 # Run only one specific rule
 sentio scan . --rule SW003
 
@@ -43,6 +46,7 @@ Arguments:
 
 Options:
   --format <FORMAT>   Output format: human (default) | json
+  --output <FILE>     Write JSON output to a file (requires --format json)
   --rule <RULE_ID>    Run only a specific rule, e.g. --rule SW003
   --include-tests     Include test files (excluded by default to reduce noise)
   -h, --help          Print help
