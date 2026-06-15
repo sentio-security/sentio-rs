@@ -120,9 +120,7 @@ pub fn collect_anchor_accounts_index(file: &syn::File) -> AnchorAccountsIndex {
 fn collect_accounts_structs(items: &[Item], structs: &mut Vec<AnchorAccountsStruct>) {
     for item in items {
         match item {
-            Item::Struct(item_struct)
-                if has_anchor_accounts_derive(&item_struct.attrs) =>
-            {
+            Item::Struct(item_struct) if has_anchor_accounts_derive(&item_struct.attrs) => {
                 structs.push(collect_accounts_struct(item_struct));
             }
             Item::Mod(module) => {

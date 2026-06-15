@@ -84,9 +84,9 @@ impl RuleRegistry {
             .iter()
             .map(|rule| rule.as_ref())
             .filter(|rule| {
-                filter.as_ref().is_none_or(|filter| {
-                    rule.metadata().id.eq_ignore_ascii_case(filter)
-                })
+                filter
+                    .as_ref()
+                    .is_none_or(|filter| rule.metadata().id.eq_ignore_ascii_case(filter))
             })
             .collect()
     }
