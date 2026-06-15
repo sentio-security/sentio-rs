@@ -62,6 +62,12 @@ impl RuleRegistry {
             Box::new(anchor::missing_owner_check::MissingOwnerCheckRule::default()),
             Box::new(anchor::arbitrary_cpi::ArbitraryCpiRule::default()),
             Box::new(anchor::missing_cpi_reload::MissingCpiReloadRule::default()),
+            Box::new(anchor::unchecked_arithmetic::UncheckedArithmeticRule::default()),
+            Box::new(anchor::type_cosplay::TypeCosplayRule::default()),
+            Box::new(anchor::missing_token_mint_check::MissingTokenMintCheckRule::default()),
+            Box::new(anchor::missing_token_owner_check::MissingTokenOwnerCheckRule::default()),
+            Box::new(anchor::pda_seed_unvalidated_account::PdaSeedUnvalidatedAccountRule::default()),
+            Box::new(anchor::pda_bump_not_canonical::PdaBumpNotCanonicalRule::default()),
         ])
     }
 

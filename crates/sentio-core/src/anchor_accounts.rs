@@ -106,6 +106,8 @@ pub enum AnchorConstraintKind {
     Custom,
 }
 
+// functions related to entering the scanning phase
+
 pub fn collect_anchor_accounts_index(file: &syn::File) -> AnchorAccountsIndex {
     let mut structs = Vec::new();
     collect_accounts_structs(&file.items, &mut structs);
@@ -228,6 +230,8 @@ impl AnchorFieldConstraints {
     }
 }
 
+// function related to constraints
+
 fn constraint_kind(path: &str) -> AnchorConstraintKind {
     if path == "signer" {
         AnchorConstraintKind::Signer
@@ -263,6 +267,8 @@ fn constraint_kind(path: &str) -> AnchorConstraintKind {
         AnchorConstraintKind::Custom
     }
 }
+
+// functions related to type classification
 
 fn classify_field_type(ty: &str) -> AnchorFieldType {
     match syn::parse_str::<Type>(ty) {
@@ -356,6 +362,8 @@ fn first_type_argument(arguments: &PathArguments) -> Option<&Type> {
     })
 }
 
+// functions related to normalisation utilities
+
 fn normalize_path(path: &str) -> String {
     let compact: String = path.split_whitespace().collect();
     compact
@@ -392,6 +400,8 @@ impl Parse for ParsedConstraintEntry {
     }
 }
 
+// function related to custom parser
+
 fn parse_constraint_path(input: ParseStream<'_>) -> syn::Result<String> {
     let mut segments = Vec::new();
 
@@ -409,6 +419,7 @@ fn parse_constraint_path(input: ParseStream<'_>) -> syn::Result<String> {
     Ok(normalize_path(&segments.join("::")))
 }
 
+//tests
 #[cfg(test)]
 mod tests {
     use super::*;
