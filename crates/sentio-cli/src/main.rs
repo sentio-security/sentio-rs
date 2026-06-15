@@ -25,7 +25,12 @@ fn run() -> Result<i32> {
             format,
             rule,
             include_tests,
+            output,
         } => {
+            if output.is_some() && !matches!(format, OutputFormat::Json) {
+                anyhow::bail!("--output requires --format json");
+            }
+
             let scanner = Scanner::new();
             let options = ScanOptions {
                 include_tests,
@@ -35,7 +40,15 @@ fn run() -> Result<i32> {
 
             match format {
                 OutputFormat::Human => render_human(&result),
-                OutputFormat::Json => render_json(&result)?,
+                OutputFormat::Json => {
+                    if let Some(ref file_path) = output {
+                        let json = serde_json::to_string_pretty(&result)?;
+                        std::fs::write(file_path, &json)?;
+                        eprintln!("Report written to {file_path}");
+                    } else {
+                        render_json(&result)?;
+                    }
+                }
             }
 
             Ok(if !result.parse_failures.is_empty() {
@@ -113,6 +126,10 @@ enum Commands {
         /// Include test files in the scan (excluded by default to reduce noise)
         #[arg(long)]
         include_tests: bool,
+
+        /// Write JSON output to a file instead of stdout (requires --format json)
+        #[arg(long, value_name = "FILE")]
+        output: Option<String>,
     },
     /// Manage and inspect the built-in rule set
     Rules {

@@ -32,7 +32,21 @@ impl Scanner {
     }
 
     pub fn scan_path(&self, path: &str, options: &ScanOptions) -> ScanResult {
-        let file_paths: Vec<PathBuf> = discover_rust_files(path, options).collect();
+        let (roots, anchor_programs) = resolve_scan_roots(path);
+
+        if let Some(ref programs) = anchor_programs {
+            eprintln!(
+                "Anchor workspace detected — scanning {} program(s): {}",
+                programs.len(),
+                programs.join(", ")
+            );
+        }
+
+        let file_paths: Vec<PathBuf> = roots
+            .iter()
+            .flat_map(|root| discover_rust_files(root, options))
+            .collect();
+
         let files_scanned = file_paths.len();
         let syntax_report = parse_rust_files(file_paths);
         self.scan_report(files_scanned, syntax_report, options)
@@ -94,6 +108,73 @@ impl Scanner {
     }
 }
 
+/// Detects an Anchor workspace at `path` by looking for `Anchor.toml`.
+/// If found, expands `[workspace] members` glob patterns and returns the program roots.
+/// Returns `(roots_to_scan, Some(program_names))` on detection, or `([path], None)` otherwise.
+fn resolve_scan_roots(path: &str) -> (Vec<PathBuf>, Option<Vec<String>>) {
+    let root = PathBuf::from(path);
+    let anchor_toml_path = root.join("Anchor.toml");
+
+    if !anchor_toml_path.exists() {
+        return (vec![root], None);
+    }
+
+    let content = match std::fs::read_to_string(&anchor_toml_path) {
+        Ok(c) => c,
+        Err(_) => return (vec![root], None),
+    };
+
+    let parsed: toml::Value = match content.parse() {
+        Ok(v) => v,
+        Err(_) => return (vec![root], None),
+    };
+
+    let members: Vec<&str> = parsed
+        .get("workspace")
+        .and_then(|w| w.get("members"))
+        .and_then(|m| m.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+        .unwrap_or_default();
+
+    if members.is_empty() {
+        return (vec![root], Some(vec![]));
+    }
+
+    let mut roots: Vec<PathBuf> = Vec::new();
+    for member in &members {
+        if let Some(prefix) = member.strip_suffix("/*") {
+            // glob pattern like "programs/*" — expand to all subdirs with a Cargo.toml
+            let dir = root.join(prefix);
+            if let Ok(entries) = std::fs::read_dir(&dir) {
+                let mut subdirs: Vec<PathBuf> = entries
+                    .flatten()
+                    .map(|e| e.path())
+                    .filter(|p| p.is_dir() && p.join("Cargo.toml").exists())
+                    .collect();
+                subdirs.sort();
+                roots.extend(subdirs);
+            }
+        } else {
+            let p = root.join(member);
+            if p.exists() {
+                roots.push(p);
+            }
+        }
+    }
+
+    if roots.is_empty() {
+        return (vec![root], Some(vec![]));
+    }
+
+    let names: Vec<String> = roots
+        .iter()
+        .filter_map(|r| r.file_name())
+        .map(|n| n.to_string_lossy().into_owned())
+        .collect();
+
+    (roots, Some(names))
+}
+
 fn is_suppressed(finding: &Finding, suppressions: &[(String, SuppressionSet)]) -> bool {
     suppressions
         .iter()
@@ -102,10 +183,10 @@ fn is_suppressed(finding: &Finding, suppressions: &[(String, SuppressionSet)]) -
 }
 
 fn discover_rust_files<'a>(
-    path: &'a str,
+    root: &'a Path,
     options: &'a ScanOptions,
 ) -> impl Iterator<Item = PathBuf> + 'a {
-    WalkDir::new(path)
+    WalkDir::new(root)
         .into_iter()
         .filter_map(Result::ok)
         .filter(|entry| entry.file_type().is_file())
