@@ -391,13 +391,37 @@ impl Parse for ParsedConstraintEntry {
         let path = parse_constraint_path(input)?;
         let value = if input.peek(syn::Token![=]) {
             input.parse::<syn::Token![=]>()?;
-            Some(input.parse::<Expr>()?)
+            // Collect tokens for the value, stopping at Anchor's `@ ErrorCode` annotation
+            // or the next constraint separator `,`. This prevents parse failure when
+            // attributes use `= expr @ Error::Variant` (not valid Rust expression syntax).
+            let value_tokens = collect_value_tokens(input)?;
+            syn::parse2::<Expr>(value_tokens).ok()
         } else {
             None
         };
 
         Ok(Self { path, value })
     }
+}
+
+fn collect_value_tokens(input: ParseStream<'_>) -> syn::Result<proc_macro2::TokenStream> {
+    use proc_macro2::TokenTree;
+    let mut tokens = proc_macro2::TokenStream::new();
+
+    while !input.is_empty() && !input.peek(syn::Token![,]) && !input.peek(syn::Token![@]) {
+        let tt: TokenTree = input.parse()?;
+        tokens.extend(std::iter::once(tt));
+    }
+
+    // Discard Anchor's `@ ErrorCode::Variant` error annotation
+    if input.peek(syn::Token![@]) {
+        input.parse::<syn::Token![@]>()?;
+        while !input.is_empty() && !input.peek(syn::Token![,]) {
+            let _: TokenTree = input.parse()?;
+        }
+    }
+
+    Ok(tokens)
 }
 
 // function related to custom parser
@@ -498,6 +522,39 @@ mod tests {
             fields[8].type_info.wrappers[0].kind,
             AnchorTypeWrapperKind::Ref
         );
+    }
+
+    #[test]
+    fn parses_address_with_anchor_error_annotation() {
+        let file = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+
+            #[derive(Accounts)]
+            pub struct Oracle<'info> {
+                #[account(mut, address = market.oracle @ OracleError::WrongFeed)]
+                pub oracle: UncheckedAccount<'info>,
+                #[account(has_one = authority @ MyError::Unauthorized, seeds = [b"vault"], bump)]
+                pub vault: Account<'info, Vault>,
+            }
+            "#,
+        );
+
+        let index = collect_anchor_accounts_index(&file);
+        let oracle = &index.structs[0].fields[0].constraints;
+        assert!(oracle.is_mut);
+        assert!(
+            oracle.address,
+            "address constraint must be detected despite @ annotation"
+        );
+
+        let vault = &index.structs[0].fields[1].constraints;
+        assert!(
+            !vault.has_one.is_empty(),
+            "has_one must be detected despite @ annotation"
+        );
+        assert!(vault.has_seeds);
+        assert!(vault.has_bump);
     }
 
     #[test]
