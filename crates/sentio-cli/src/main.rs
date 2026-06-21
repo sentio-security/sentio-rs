@@ -90,7 +90,9 @@ fn render_version() -> Result<i32> {
     let check = telemetry::check_version(installed);
     if let Some(latest) = check.latest {
         if latest != installed {
-            println!("A newer version is available: {latest} (run `cargo install sentio-cli --force`)");
+            println!(
+                "A newer version is available: {latest} (run `cargo install sentio-cli --force`)"
+            );
         }
     }
 
