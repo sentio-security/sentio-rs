@@ -10,6 +10,7 @@ pub mod missing_signer_check;
 pub mod missing_token_mint_check;
 pub mod missing_token_owner_check;
 pub mod pda_bump_not_canonical;
+pub mod pda_seed_collision_risk;
 pub mod pda_seed_unvalidated_account;
 pub mod type_cosplay;
 pub mod unchecked_arithmetic;
