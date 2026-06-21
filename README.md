@@ -12,6 +12,9 @@ sentio scans Rust source files for common Solana vulnerability patterns using [`
 # Install
 cargo install sentio-cli
 
+# Verify installation
+sentio version
+
 # Scan your program
 sentio scan /path/to/your/anchor-program
 
@@ -36,8 +39,9 @@ sentio rules list
 sentio <COMMAND>
 
 Commands:
-  scan    Scan a Solana program directory or file for vulnerabilities
-  rules   Manage and inspect the built-in rule set
+  scan      Scan a Solana program directory or file for vulnerabilities
+  rules     Manage and inspect the built-in rule set
+  version   Print the installed sentio version and check for updates
 
 sentio scan [OPTIONS] [PATH]
 
@@ -52,7 +56,10 @@ Options:
   -h, --help          Print help
 
 sentio rules list     Print all rule IDs and titles
+sentio version         Print the installed version and check for a newer release
 ```
+
+`sentio version` makes a brief network call to check for updates. Set `SENTIO_NO_TELEMETRY=1` to disable it. No source code, file paths, or scan results ever leave your machine — `scan` never makes network calls.
 
 **Exit codes**
 

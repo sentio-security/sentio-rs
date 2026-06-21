@@ -4,6 +4,8 @@ use sentio_cli::render_human_report;
 use sentio_core::{RuleRegistry, ScanOptions, Scanner};
 use std::io::{self, IsTerminal};
 
+mod telemetry;
+
 fn main() {
     let exit_code = match run() {
         Ok(code) => code,
@@ -62,7 +64,22 @@ fn run() -> Result<i32> {
         Commands::Rules {
             command: RulesCommands::List,
         } => render_rule_list(),
+        Commands::Version => render_version(),
     }
+}
+
+fn render_version() -> Result<i32> {
+    let installed = env!("CARGO_PKG_VERSION");
+    println!("sentio {installed}");
+
+    let check = telemetry::check_version(installed);
+    if let Some(latest) = check.latest {
+        if latest != installed {
+            println!("A newer version is available: {latest} (run `cargo install sentio-cli --force`)");
+        }
+    }
+
+    Ok(0)
 }
 
 fn render_rule_list() -> Result<i32> {
@@ -136,6 +153,8 @@ enum Commands {
         #[command(subcommand)]
         command: RulesCommands,
     },
+    /// Print the installed sentio version and check for updates
+    Version,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
