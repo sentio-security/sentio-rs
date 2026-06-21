@@ -1,5 +1,5 @@
 use anyhow::Result;
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use sentio_cli::render_human_report;
 use sentio_core::{RuleRegistry, ScanOptions, Scanner};
 use std::io::{self, IsTerminal};
@@ -21,7 +21,22 @@ fn main() {
 fn run() -> Result<i32> {
     let cli = Cli::parse();
 
-    match cli.command {
+    // `--version`/`-V` is handled manually (instead of clap's built-in flag)
+    // so it goes through the same version-check ping as `sentio version`.
+    if cli.version {
+        return render_version();
+    }
+
+    let Some(command) = cli.command else {
+        Cli::command()
+            .error(
+                clap::error::ErrorKind::MissingRequiredArgument,
+                "a subcommand is required (try `sentio --help`)",
+            )
+            .exit();
+    };
+
+    match command {
         Commands::Scan {
             path,
             format,
@@ -107,7 +122,7 @@ fn render_json(result: &sentio_core::ScanResult) -> Result<()> {
 #[derive(Debug, Parser)]
 #[command(name = "sentio")]
 #[command(author = "Sentio Security")]
-#[command(version)]
+#[command(disable_version_flag = true)]
 #[command(about = "AST-based security scanner for Solana/Anchor programs")]
 #[command(
     long_about = "sentio scans Rust source files in Solana programs for common vulnerability\n\
@@ -120,8 +135,12 @@ Exit codes:\n  \
 2  Parse error in one or more files"
 )]
 struct Cli {
+    /// Print the installed sentio version and check for updates
+    #[arg(short = 'V', long = "version")]
+    version: bool,
+
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Debug, Subcommand)]

@@ -55,11 +55,11 @@ Options:
   --include-tests     Include test files (excluded by default to reduce noise)
   -h, --help          Print help
 
-sentio rules list     Print all rule IDs and titles
-sentio version         Print the installed version and check for a newer release
+sentio rules list             Print all rule IDs and titles
+sentio version, -V, --version Print the installed version and check for a newer release
 ```
 
-`sentio version` makes a brief network call to check for updates. Set `SENTIO_NO_TELEMETRY=1` to disable it. No source code, file paths, or scan results ever leave your machine — `scan` never makes network calls.
+`sentio version` (and `-V`/`--version`) make a brief network call to check for updates. A random anonymous ID is generated on first run and stored at `~/.config/sentio/telemetry_id` so repeated checks from the same machine don't get counted more than once. Set `SENTIO_NO_TELEMETRY=1` to disable this entirely. No source code, file paths, or scan results ever leave your machine — `scan` never makes network calls.
 
 **Exit codes**
 
