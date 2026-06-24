@@ -177,7 +177,17 @@ Suppress a finding on the next line:
 pub authority: AccountInfo<'info>,
 ```
 
-Both forms accept a comma-separated list of rule IDs: `// sentio-ignore SW001, SW002`.
+Suppress all findings of a rule within an entire function (useful for intentionally permissionless instructions):
+
+```rust
+// sentio-ignore-fn SW007
+pub fn permissionless_ix(ctx: Context<MyAccounts>) -> Result<()> {
+    // all SW007 findings inside this function are suppressed
+    Ok(())
+}
+```
+
+All forms accept a comma-separated list of rule IDs: `// sentio-ignore SW001, SW002`.
 
 ---
 

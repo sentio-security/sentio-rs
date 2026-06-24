@@ -103,6 +103,8 @@ impl Default for RuleRegistry {
 pub struct SuppressionSet {
     same_line: HashMap<usize, Vec<String>>,
     next_line: HashMap<usize, Vec<String>>,
+    /// (start_line, end_line, rule_ids) — inclusive line range for sentio-ignore-fn
+    fn_ranges: Vec<(usize, usize, Vec<String>)>,
 }
 
 impl SuppressionSet {
@@ -110,16 +112,25 @@ impl SuppressionSet {
         Self {
             same_line: HashMap::new(),
             next_line: HashMap::new(),
+            fn_ranges: Vec::new(),
         }
     }
 
     pub fn from_source(source: &str) -> Self {
         let mut same_line: HashMap<usize, Vec<String>> = HashMap::new();
         let mut next_line: HashMap<usize, Vec<String>> = HashMap::new();
+        let mut fn_ranges: Vec<(usize, usize, Vec<String>)> = Vec::new();
 
-        for (idx, line) in source.lines().enumerate() {
+        let lines: Vec<&str> = source.lines().collect();
+
+        for (idx, line) in lines.iter().enumerate() {
             let line_no = idx + 1;
-            if let Some(ids) = parse_ignore_directive(line, "sentio-ignore") {
+            if let Some(ids) = parse_ignore_directive(line, "sentio-ignore-fn") {
+                // Scan forward from the next line to find the function's closing brace.
+                if let Some(end_line) = find_fn_end_line(&lines, idx + 1) {
+                    fn_ranges.push((line_no + 1, end_line, ids));
+                }
+            } else if let Some(ids) = parse_ignore_directive(line, "sentio-ignore") {
                 same_line.insert(line_no, ids);
             }
             if let Some(ids) = parse_ignore_directive(line, "sentio-ignore-next-line") {
@@ -130,6 +141,7 @@ impl SuppressionSet {
         Self {
             same_line,
             next_line,
+            fn_ranges,
         }
     }
 
@@ -144,7 +156,36 @@ impl SuppressionSet {
                 .next_line
                 .get(&line)
                 .is_some_and(|ids| ids.iter().any(|id| id == &rule_id))
+            || self.fn_ranges.iter().any(|(start, end, ids)| {
+                line >= *start && line <= *end && ids.iter().any(|id| id == &rule_id)
+            })
     }
+}
+
+/// Finds the 1-indexed line number of the closing brace of the first `{...}` block
+/// that starts at or after `from_idx` (0-indexed). Used to determine the end of a
+/// function body following a `sentio-ignore-fn` comment.
+fn find_fn_end_line(lines: &[&str], from_idx: usize) -> Option<usize> {
+    let mut depth = 0i32;
+    let mut started = false;
+    for (i, line) in lines[from_idx..].iter().enumerate() {
+        for ch in line.chars() {
+            match ch {
+                '{' => {
+                    depth += 1;
+                    started = true;
+                }
+                '}' => {
+                    depth -= 1;
+                    if started && depth == 0 {
+                        return Some(from_idx + i + 1); // convert to 1-indexed
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    None
 }
 
 pub fn convert_severity(severity: RuleSeverity) -> Severity {
@@ -224,5 +265,66 @@ mod tests {
 
         assert!(suppressions.is_suppressed(&same_line));
         assert!(suppressions.is_suppressed(&next_line));
+    }
+
+    #[test]
+    fn fn_level_suppression_covers_body_not_outside() {
+        let source = r#"
+// sentio-ignore-fn SW007
+pub fn permissionless(ctx: Context<Foo>) -> Result<()> {
+    let x = 1;
+    let y = 2;
+    Ok(())
+}
+pub fn other() -> Result<()> {
+    Ok(())
+}
+"#;
+        let suppressions = SuppressionSet::from_source(source);
+
+        let make = |line: usize| Finding {
+            rule_id: "SW007".to_string(),
+            severity: Severity::High,
+            message: String::new(),
+            location: SourceLocation {
+                path: "x.rs".to_string(),
+                line,
+                column: 1,
+            },
+            help: None,
+            suppressed: false,
+        };
+
+        // Lines 3-7 are inside the permissionless fn body
+        assert!(suppressions.is_suppressed(&make(3)));
+        assert!(suppressions.is_suppressed(&make(5)));
+        assert!(suppressions.is_suppressed(&make(7)));
+        // Lines 8-10 are outside (second fn)
+        assert!(!suppressions.is_suppressed(&make(8)));
+        assert!(!suppressions.is_suppressed(&make(9)));
+    }
+
+    #[test]
+    fn fn_level_suppression_does_not_suppress_other_rules() {
+        let source = r#"
+// sentio-ignore-fn SW007
+pub fn permissionless(ctx: Context<Foo>) -> Result<()> {
+    Ok(())
+}
+"#;
+        let suppressions = SuppressionSet::from_source(source);
+        let finding = Finding {
+            rule_id: "SW001".to_string(),
+            severity: Severity::Critical,
+            message: String::new(),
+            location: SourceLocation {
+                path: "x.rs".to_string(),
+                line: 4,
+                column: 1,
+            },
+            help: None,
+            suppressed: false,
+        };
+        assert!(!suppressions.is_suppressed(&finding));
     }
 }
