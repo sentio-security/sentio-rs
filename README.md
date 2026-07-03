@@ -1,5 +1,24 @@
 # sentio
 
+<p align="center">
+  <img src="https://avatars.githubusercontent.com/u/282654001?s=200&v=4" alt="sentio" width="120" />
+</p>
+
+<p align="center">
+  <a href="https://crates.io/crates/sentio-cli">
+    <img src="https://img.shields.io/crates/v/sentio-cli?color=C4531A&label=sentio-cli" alt="crates.io version" />
+  </a>
+  <a href="https://crates.io/crates/sentio-cli">
+    <img src="https://img.shields.io/crates/d/sentio-cli?color=6B4C3B&label=downloads" alt="crates.io downloads" />
+  </a>
+  <a href="https://crates.io/crates/sentio-core">
+    <img src="https://img.shields.io/crates/v/sentio-core?color=2C1810&label=sentio-core" alt="sentio-core version" />
+  </a>
+  <a href="https://github.com/sentio-security/sentio-rs/blob/main/LICENSE">
+    <img src="https://img.shields.io/crates/l/sentio-cli" alt="license" />
+  </a>
+</p>
+
 **AST-based security scanner for Anchor programs.**
 
 sentio scans Rust source files for common Solana vulnerability patterns using [`syn`](https://docs.rs/syn) — Rust's macro-safe AST parser. It understands Anchor account constraints, instruction logic, and CPI call graphs to produce high-signal findings with minimal false positives.
@@ -63,10 +82,10 @@ sentio version, -V, --version Print the installed version and check for a newer 
 
 **Exit codes**
 
-| Code | Meaning |
-|------|---------|
-| `0`  | No findings |
-| `1`  | One or more findings |
+| Code | Meaning                          |
+| ---- | -------------------------------- |
+| `0`  | No findings                      |
+| `1`  | One or more findings             |
 | `2`  | Parse error in one or more files |
 
 ---
@@ -141,24 +160,24 @@ By rule:
 
 ## Rules
 
-| ID | Title | Severity | What it catches |
-|----|-------|----------|-----------------|
-| SW001 | Missing signer check | Critical | `AccountInfo`/`UncheckedAccount` named as authority with no `#[account(signer)]` and no `is_signer` guard |
-| SW002 | Missing owner check | Critical | `AccountInfo`/`UncheckedAccount` with no `owner` or `address` constraint and no owner guard in handler |
-| SW003 | Arbitrary CPI target | Critical | Raw `invoke`/`invoke_signed` calls with no preceding program key validation |
-| SW005 | Unchecked arithmetic | High | `+`, `-`, `*`, `+=`, `-=`, `*=` on account fields with no checked math; can overflow in release builds |
-| SW006 | Type cosplay | Critical | `try_from_slice` without a discriminator check; a malicious account type can be deserialized as another |
-| SW008 | Missing post-CPI reload | High | Account written after a CPI that may have mutated it, without an intervening `reload()` |
-| SW009 | Missing token mint check | High | Mutable `TokenAccount` with no `token::mint` constraint and no `associated_token`, allowing wrong-mint deposits |
-| SW010 | Missing token owner check | High | Mutable `TokenAccount` with no `token::authority` or authority `has_one`, allowing unauthorized withdrawals |
-| SW011 | AccountInfo as data account | Medium | `AccountInfo` used where a typed `Account<'info, T>` is needed (init/has_one/seeds constraints present) |
-| SW012 | Missing seeds + bump on PDA | High | PDA accounts with `seeds` but no `bump`, skipping bump verification |
-| SW013 | PDA seed unvalidated account | High | PDA seeds reference an `AccountInfo`/`UncheckedAccount` sibling with no `owner`, `address`, or `signer` constraint |
-| SW014 | PDA bump not canonical | Medium | `bump = <bare_identifier>` uses a caller-supplied bump instead of Anchor's canonical derivation |
-| SW016 | init_if_needed usage | Medium | `init_if_needed` accounts that can be silently re-initialized, resetting state |
-| SW018 | Missing realloc::zero | Medium | `realloc` without `realloc::zero = true`, leaving stale data in reallocated memory |
-| SW020 | AccountInfo as CPI program | Medium | `AccountInfo` used as a CPI program account instead of typed `Program<'info, T>` |
-| SW021 | PDA seed collision risk | High | Adjacent variable-length seeds (e.g. `name.as_bytes()` next to `symbol.as_bytes()`) with no fixed-length seed between them, allowing different inputs to derive the same PDA |
+| ID    | Title                        | Severity | What it catches                                                                                                                                                              |
+| ----- | ---------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| SW001 | Missing signer check         | Critical | `AccountInfo`/`UncheckedAccount` named as authority with no `#[account(signer)]` and no `is_signer` guard                                                                    |
+| SW002 | Missing owner check          | Critical | `AccountInfo`/`UncheckedAccount` with no `owner` or `address` constraint and no owner guard in handler                                                                       |
+| SW003 | Arbitrary CPI target         | Critical | Raw `invoke`/`invoke_signed` calls with no preceding program key validation                                                                                                  |
+| SW005 | Unchecked arithmetic         | High     | `+`, `-`, `*`, `+=`, `-=`, `*=` on account fields with no checked math; can overflow in release builds                                                                       |
+| SW006 | Type cosplay                 | Critical | `try_from_slice` without a discriminator check; a malicious account type can be deserialized as another                                                                      |
+| SW008 | Missing post-CPI reload      | High     | Account written after a CPI that may have mutated it, without an intervening `reload()`                                                                                      |
+| SW009 | Missing token mint check     | High     | Mutable `TokenAccount` with no `token::mint` constraint and no `associated_token`, allowing wrong-mint deposits                                                              |
+| SW010 | Missing token owner check    | High     | Mutable `TokenAccount` with no `token::authority` or authority `has_one`, allowing unauthorized withdrawals                                                                  |
+| SW011 | AccountInfo as data account  | Medium   | `AccountInfo` used where a typed `Account<'info, T>` is needed (init/has_one/seeds constraints present)                                                                      |
+| SW012 | Missing seeds + bump on PDA  | High     | PDA accounts with `seeds` but no `bump`, skipping bump verification                                                                                                          |
+| SW013 | PDA seed unvalidated account | High     | PDA seeds reference an `AccountInfo`/`UncheckedAccount` sibling with no `owner`, `address`, or `signer` constraint                                                           |
+| SW014 | PDA bump not canonical       | Medium   | `bump = <bare_identifier>` uses a caller-supplied bump instead of Anchor's canonical derivation                                                                              |
+| SW016 | init_if_needed usage         | Medium   | `init_if_needed` accounts that can be silently re-initialized, resetting state                                                                                               |
+| SW018 | Missing realloc::zero        | Medium   | `realloc` without `realloc::zero = true`, leaving stale data in reallocated memory                                                                                           |
+| SW020 | AccountInfo as CPI program   | Medium   | `AccountInfo` used as a CPI program account instead of typed `Program<'info, T>`                                                                                             |
+| SW021 | PDA seed collision risk      | High     | Adjacent variable-length seeds (e.g. `name.as_bytes()` next to `symbol.as_bytes()`) with no fixed-length seed between them, allowing different inputs to derive the same PDA |
 
 ### Inline Suppressions
 
@@ -285,7 +304,7 @@ sentio-rs/
 │   │   │   ├── anchor_accounts.rs       # Anchor #[account(...)] constraint parser
 │   │   │   ├── instruction_analysis.rs  # Guard / call / write extractor with CPI cross-reference
 │   │   │   ├── rules/
-│   │   │   │   └── anchor/              # One module per rule (SW001–SW020)
+│   │   │   │   └── anchor/              # One module per rule (SW001–SW021)
 │   │   │   ├── scanner.rs               # File walker + suppression pass
 │   │   │   └── syntax.rs                # syn parsing wrapper
 │   │   └── tests/
