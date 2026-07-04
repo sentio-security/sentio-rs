@@ -69,6 +69,8 @@ impl RuleRegistry {
             Box::new(anchor::pda_seed_unvalidated_account::PdaSeedUnvalidatedAccountRule),
             Box::new(anchor::pda_bump_not_canonical::PdaBumpNotCanonicalRule),
             Box::new(anchor::pda_seed_collision_risk::PdaSeedCollisionRiskRule),
+            Box::new(anchor::missing_close_constraint::MissingCloseConstraintRule),
+            Box::new(anchor::cpi_remaining_accounts::CpiRemainingAccountsRule),
         ])
     }
 

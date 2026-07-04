@@ -178,6 +178,8 @@ By rule:
 | SW018 | Missing realloc::zero        | Medium   | `realloc` without `realloc::zero = true`, leaving stale data in reallocated memory                                                                                           |
 | SW020 | AccountInfo as CPI program   | Medium   | `AccountInfo` used as a CPI program account instead of typed `Program<'info, T>`                                                                                             |
 | SW021 | PDA seed collision risk      | High     | Adjacent variable-length seeds (e.g. `name.as_bytes()` next to `symbol.as_bytes()`) with no fixed-length seed between them, allowing different inputs to derive the same PDA |
+| SW022 | Missing close constraint     | High     | Manual lamport draining to close accounts without `#[account(close = ...)]`; account data not zeroed, leaving it open to reinitialization with stale data |
+| SW023 | Unvalidated remaining_accounts in CPI | High | `ctx.remaining_accounts` forwarded into a CPI; unconstrained accounts retain outer-transaction signer privileges inside the call, enabling privilege escalation |
 
 ### Inline Suppressions
 
@@ -337,4 +339,4 @@ sentio-rs/
 
 sentio is under active development. The rule set is growing; the AST infrastructure is stable.
 
-**16 rules ship today** covering the most common Solana/Anchor vulnerability classes. Native Solana (non-Anchor) rule support is on the roadmap.
+**18 rules ship today** covering the most common Solana/Anchor vulnerability classes. Native Solana (non-Anchor) rule support is on the roadmap.
