@@ -19,7 +19,8 @@ impl Rule for DivisionByZeroRule {
                           (field access, variable, or parameter) with no prior zero-check. \
                           In Solana programs, user-supplied or account-sourced denominators can \
                           be zero, causing a runtime panic and a failed transaction.",
-            fix_guidance: "Guard the divisor with require!(divisor != 0, ErrorCode::DivisionByZero) \
+            fix_guidance:
+                "Guard the divisor with require!(divisor != 0, ErrorCode::DivisionByZero) \
                            before dividing, or use checked_div() / checked_rem() and propagate \
                            the None case as an error.",
         };
@@ -27,7 +28,9 @@ impl Rule for DivisionByZeroRule {
     }
 
     fn match_file(&self, file: &ParsedFile, _ctx: &RuleContext<'_>) -> Vec<RuleMatch> {
-        let mut collector = DivisionCollector { findings: Vec::new() };
+        let mut collector = DivisionCollector {
+            findings: Vec::new(),
+        };
         visit::visit_file(&mut collector, &file.syntax);
 
         collector
@@ -91,8 +94,12 @@ impl<'ast> Visit<'ast> for DivisionCollector {
 
 /// Returns true when the expression is a plain numeric literal (e.g. `2`, `100u64`, `0x10`).
 fn is_numeric_literal(expr: &str) -> bool {
-    let s = expr.trim().trim_end_matches(|c: char| c.is_ascii_alphabetic()); // strip suffixes
-    !s.is_empty() && s.chars().all(|c| c.is_ascii_digit() || c == '_' || c == 'x' || c == 'b' || c == 'o')
+    let s = expr
+        .trim()
+        .trim_end_matches(|c: char| c.is_ascii_alphabetic()); // strip suffixes
+    !s.is_empty()
+        && s.chars()
+            .all(|c| c.is_ascii_digit() || c == '_' || c == 'x' || c == 'b' || c == 'o')
 }
 
 #[cfg(test)]
@@ -120,7 +127,12 @@ mod tests {
             "#,
         );
         let rule = DivisionByZeroRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].rule_id, "SW024");
     }
@@ -135,7 +147,12 @@ mod tests {
             "#,
         );
         let rule = DivisionByZeroRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].rule_id, "SW024");
     }
@@ -150,7 +167,12 @@ mod tests {
             "#,
         );
         let rule = DivisionByZeroRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert!(findings.is_empty());
     }
 
@@ -164,7 +186,12 @@ mod tests {
             "#,
         );
         let rule = DivisionByZeroRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert!(findings.is_empty());
     }
 }
