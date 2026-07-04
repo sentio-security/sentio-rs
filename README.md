@@ -180,6 +180,7 @@ By rule:
 | SW021 | PDA seed collision risk      | High     | Adjacent variable-length seeds (e.g. `name.as_bytes()` next to `symbol.as_bytes()`) with no fixed-length seed between them, allowing different inputs to derive the same PDA |
 | SW022 | Missing close constraint     | High     | Manual lamport draining to close accounts without `#[account(close = ...)]`; account data not zeroed, leaving it open to reinitialization with stale data |
 | SW023 | Unvalidated remaining_accounts in CPI | High | `ctx.remaining_accounts` forwarded into a CPI; unconstrained accounts retain outer-transaction signer privileges inside the call, enabling privilege escalation |
+| SW024 | Division by zero | High | Division or modulo where the divisor is a variable or account field with no prior zero-check; a zero divisor panics and fails the transaction |
 
 ### Inline Suppressions
 
@@ -339,4 +340,4 @@ sentio-rs/
 
 sentio is under active development. The rule set is growing; the AST infrastructure is stable.
 
-**18 rules ship today** covering the most common Solana/Anchor vulnerability classes. Native Solana (non-Anchor) rule support is on the roadmap.
+**19 rules ship today** covering the most common Solana/Anchor vulnerability classes. Native Solana (non-Anchor) rule support is on the roadmap.

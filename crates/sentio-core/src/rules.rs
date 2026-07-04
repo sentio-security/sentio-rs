@@ -1,4 +1,5 @@
 pub mod anchor;
+pub mod math;
 
 use crate::finding::{Finding, Severity, SourceLocation};
 use crate::syntax::ParsedFile;
@@ -71,6 +72,7 @@ impl RuleRegistry {
             Box::new(anchor::pda_seed_collision_risk::PdaSeedCollisionRiskRule),
             Box::new(anchor::missing_close_constraint::MissingCloseConstraintRule),
             Box::new(anchor::cpi_remaining_accounts::CpiRemainingAccountsRule),
+            Box::new(math::division_by_zero::DivisionByZeroRule),
         ])
     }
 
