@@ -1,10 +1,10 @@
 use crate::finding::SourceLocation;
 use crate::rules::{Rule, RuleContext, RuleMatch, RuleMetadata, RuleSeverity};
 use crate::syntax::ParsedFile;
+use quote::ToTokens;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 use syn::ExprCall;
-use quote::ToTokens;
 
 #[derive(Debug, Default)]
 pub struct CreateProgramAddressRule;
@@ -28,7 +28,9 @@ impl Rule for CreateProgramAddressRule {
     }
 
     fn match_file(&self, file: &ParsedFile, _ctx: &RuleContext<'_>) -> Vec<RuleMatch> {
-        let mut collector = CreateProgramAddressCollector { findings: Vec::new() };
+        let mut collector = CreateProgramAddressCollector {
+            findings: Vec::new(),
+        };
         visit::visit_file(&mut collector, &file.syntax);
 
         collector
@@ -103,7 +105,12 @@ mod tests {
             "#,
         );
         let rule = CreateProgramAddressRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].rule_id, "SW026");
     }
@@ -119,7 +126,12 @@ mod tests {
             "#,
         );
         let rule = CreateProgramAddressRule;
-        let findings = rule.match_file(&file, &RuleContext { files: std::slice::from_ref(&file) });
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
         assert!(findings.is_empty());
     }
 }
