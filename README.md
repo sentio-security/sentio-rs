@@ -181,6 +181,9 @@ By rule:
 | SW022 | Missing close constraint     | High     | Manual lamport draining to close accounts without `#[account(close = ...)]`; account data not zeroed, leaving it open to reinitialization with stale data |
 | SW023 | Unvalidated remaining_accounts in CPI | High | `ctx.remaining_accounts` forwarded into a CPI; unconstrained accounts retain outer-transaction signer privileges inside the call, enabling privilege escalation |
 | SW024 | Division by zero | High | Division or modulo where the divisor is a variable or account field with no prior zero-check; a zero divisor panics and fails the transaction |
+| SW025 | unwrap() / expect() in handler | Medium | `.unwrap()` or `.expect()` in instruction code panics on None/Err, failing the transaction with a generic error and exposing a DoS vector on user-controlled inputs |
+| SW026 | create_program_address usage | High | `create_program_address` accepts a caller-supplied bump and does not enforce canonical derivation; use `find_program_address` or Anchor's `seeds + bump` constraint instead |
+| SW027 | Missing event on state change | Low | Instruction handler writes to account state but emits no `emit!()` event, leaving off-chain indexers and audit trails blind to the state transition |
 
 ### Inline Suppressions
 
@@ -340,4 +343,4 @@ sentio-rs/
 
 sentio is under active development. The rule set is growing; the AST infrastructure is stable.
 
-**19 rules ship today** covering the most common Solana/Anchor vulnerability classes. Native Solana (non-Anchor) rule support is on the roadmap.
+**22 rules ship today** covering the most common Solana/Anchor vulnerability classes. Native Solana (non-Anchor) rule support is on the roadmap.

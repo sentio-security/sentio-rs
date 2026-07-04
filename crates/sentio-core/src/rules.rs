@@ -1,5 +1,6 @@
 pub mod anchor;
 pub mod math;
+pub mod rust;
 
 use crate::finding::{Finding, Severity, SourceLocation};
 use crate::syntax::ParsedFile;
@@ -73,6 +74,9 @@ impl RuleRegistry {
             Box::new(anchor::missing_close_constraint::MissingCloseConstraintRule),
             Box::new(anchor::cpi_remaining_accounts::CpiRemainingAccountsRule),
             Box::new(math::division_by_zero::DivisionByZeroRule),
+            Box::new(rust::unwrap_on_result::UnwrapOnResultRule),
+            Box::new(rust::create_program_address::CreateProgramAddressRule),
+            Box::new(rust::missing_state_change_event::MissingStateChangeEventRule),
         ])
     }
 
