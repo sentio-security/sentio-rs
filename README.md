@@ -8,7 +8,7 @@
   <a href="https://crates.io/crates/sentio-cli">
     <img src="https://img.shields.io/crates/v/sentio-cli?color=C4531A&label=sentio-cli" alt="crates.io version" />
   </a>
-  <a href="https://crates.io/crates/sentio-cli">
+  <a href="https://crates.io/crates/sentio-core">
     <img src="https://img.shields.io/crates/d/sentio-cli?color=6B4C3B&label=downloads" alt="crates.io downloads" />
   </a>
   <a href="https://crates.io/crates/sentio-core">
