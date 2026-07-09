@@ -21,4 +21,4 @@ dirs.workspace = true
 serde_json.workspace = true
 ureq.workspace = true
 uuid.workspace = true
-sentio-core = { path = "../sentio-core", version = "0.2.6" }
+sentio-core = { path = "../sentio-core", version = "0.2.7" }

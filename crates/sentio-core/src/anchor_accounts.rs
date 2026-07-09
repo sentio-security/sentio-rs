@@ -228,6 +228,69 @@ impl AnchorFieldConstraints {
 
         self.items.push(constraint);
     }
+
+    /// True when mint is pinned via `token::mint`, ATA mint, or a custom
+    /// `constraint = … .mint == …` (common equivalent form).
+    pub fn has_token_mint_check(&self) -> bool {
+        if self.token_mint {
+            return true;
+        }
+        self.items.iter().any(|c| {
+            if c.path.starts_with("associated_token") {
+                let path = c.path.replace(' ', "");
+                return path.contains("associated_token::mint") || path == "associated_token";
+            }
+            c.kind == AnchorConstraintKind::Constraint
+                && c.value
+                    .as_deref()
+                    .is_some_and(constraint_expr_checks_token_mint)
+        })
+    }
+
+    /// True when token authority/owner is pinned via `token::authority`, ATA
+    /// authority, `has_one = authority|owner`, or custom `constraint = … .owner == …`.
+    pub fn has_token_authority_check(&self) -> bool {
+        if self.token_authority {
+            return true;
+        }
+        if self.has_one.iter().any(|v| {
+            let lower = v.to_lowercase();
+            lower.contains("authority") || lower.contains("owner")
+        }) {
+            return true;
+        }
+        self.items.iter().any(|c| {
+            if c.path.starts_with("associated_token") {
+                let path = c.path.replace(' ', "");
+                return path.contains("associated_token::authority") || path == "associated_token";
+            }
+            c.kind == AnchorConstraintKind::Constraint
+                && c.value
+                    .as_deref()
+                    .is_some_and(constraint_expr_checks_token_owner)
+        })
+    }
+}
+
+/// `foo.mint == bar.mint` / `foo.mint == mint.key()` style checks.
+fn constraint_expr_checks_token_mint(expr: &str) -> bool {
+    let n: String = expr
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect::<String>()
+        .to_ascii_lowercase();
+    n.contains(".mint==") || n.contains("==") && n.contains(".mint")
+}
+
+/// `foo.owner == user.key()` / `foo.owner == market.key()` style checks.
+/// (SPL TokenAccount.owner is the authority.)
+fn constraint_expr_checks_token_owner(expr: &str) -> bool {
+    let n: String = expr
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect::<String>()
+        .to_ascii_lowercase();
+    n.contains(".owner==") || n.contains("==") && n.contains(".owner")
 }
 
 // function related to constraints

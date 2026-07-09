@@ -35,11 +35,10 @@ impl Rule for MissingTokenMintCheckRule {
                 if !field.constraints.is_mut {
                     continue;
                 }
-                if field.constraints.token_mint
+                if field.constraints.has_token_mint_check()
                     || field.constraints.address
                     || field.constraints.init
                     || field.constraints.init_if_needed
-                    || has_associated_token(field)
                 {
                     continue;
                 }
@@ -75,14 +74,6 @@ fn is_token_account(field: &AnchorAccountsField) -> bool {
         field.type_info.kind,
         AnchorFieldTypeKind::Account | AnchorFieldTypeKind::InterfaceAccount
     ) && field.type_info.display.contains("TokenAccount")
-}
-
-fn has_associated_token(field: &AnchorAccountsField) -> bool {
-    field
-        .constraints
-        .items
-        .iter()
-        .any(|c| c.path.starts_with("associated_token"))
 }
 
 #[cfg(test)]
@@ -198,5 +189,44 @@ mod tests {
             },
         );
         assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn does_not_flag_custom_constraint_mint_check() {
+        let file = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            use anchor_spl::token::TokenAccount;
+
+            #[derive(Accounts)]
+            pub struct PlaceBet<'info> {
+                pub market: Account<'info, Market>,
+                #[account(
+                    mut,
+                    constraint = user_token_account.owner == user.key(),
+                    constraint = user_token_account.mint == market.mint,
+                )]
+                pub user_token_account: Account<'info, TokenAccount>,
+                #[account(
+                    mut,
+                    constraint = vault.mint == market.mint,
+                    constraint = vault.owner == market.key(),
+                )]
+                pub vault: Account<'info, TokenAccount>,
+                pub user: Signer<'info>,
+            }
+        "#,
+        );
+        let rule = MissingTokenMintCheckRule;
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
+        assert!(
+            findings.is_empty(),
+            "custom .mint == constraints should count: {findings:?}"
+        );
     }
 }

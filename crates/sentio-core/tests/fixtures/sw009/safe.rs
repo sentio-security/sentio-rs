@@ -28,6 +28,23 @@ pub struct ReadBalance<'info> {
     pub authority: Signer<'info>,
 }
 
+/// Safe: custom constraint pins mint (equivalent to token::mint).
+#[derive(Accounts)]
+pub struct TransferCustomMint<'info> {
+    pub market: Account<'info, Market>,
+    #[account(
+        mut,
+        constraint = vault.mint == market.mint,
+        constraint = vault.owner == market.key(),
+    )]
+    pub vault: Account<'info, TokenAccount>,
+}
+
+#[account]
+pub struct Market {
+    pub mint: Pubkey,
+}
+
 pub fn handler_checked(_ctx: Context<TransferChecked>, _amount: u64) -> Result<()> {
     Ok(())
 }

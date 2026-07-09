@@ -35,12 +35,10 @@ impl Rule for MissingTokenOwnerCheckRule {
                 if !field.constraints.is_mut {
                     continue;
                 }
-                if field.constraints.token_authority
+                if field.constraints.has_token_authority_check()
                     || field.constraints.address
                     || field.constraints.init
                     || field.constraints.init_if_needed
-                    || has_associated_token(field)
-                    || has_authority_has_one(field)
                 {
                     continue;
                 }
@@ -76,23 +74,6 @@ fn is_token_account(field: &AnchorAccountsField) -> bool {
         field.type_info.kind,
         AnchorFieldTypeKind::Account | AnchorFieldTypeKind::InterfaceAccount
     ) && field.type_info.display.contains("TokenAccount")
-}
-
-fn has_associated_token(field: &AnchorAccountsField) -> bool {
-    field
-        .constraints
-        .items
-        .iter()
-        .any(|c| c.path.starts_with("associated_token"))
-}
-
-/// `has_one = authority` on a TokenAccount field validates the authority sub-field
-/// of the on-chain token account data, which counts as an owner check.
-fn has_authority_has_one(field: &AnchorAccountsField) -> bool {
-    field.constraints.has_one.iter().any(|v| {
-        let lower = v.to_lowercase();
-        lower.contains("authority") || lower.contains("owner")
-    })
 }
 
 #[cfg(test)]
@@ -235,5 +216,44 @@ mod tests {
             },
         );
         assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn does_not_flag_custom_constraint_owner_check() {
+        let file = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            use anchor_spl::token::TokenAccount;
+
+            #[derive(Accounts)]
+            pub struct PlaceBet<'info> {
+                pub market: Account<'info, Market>,
+                #[account(
+                    mut,
+                    constraint = user_token_account.owner == user.key(),
+                    constraint = user_token_account.mint == market.mint,
+                )]
+                pub user_token_account: Account<'info, TokenAccount>,
+                #[account(
+                    mut,
+                    constraint = vault.mint == market.mint,
+                    constraint = vault.owner == market.key(),
+                )]
+                pub vault: Account<'info, TokenAccount>,
+                pub user: Signer<'info>,
+            }
+        "#,
+        );
+        let rule = MissingTokenOwnerCheckRule;
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
+        assert!(
+            findings.is_empty(),
+            "custom .owner == constraints should count: {findings:?}"
+        );
     }
 }

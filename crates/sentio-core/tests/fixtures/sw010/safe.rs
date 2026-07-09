@@ -35,6 +35,24 @@ pub struct ReadBalance<'info> {
     pub authority: Signer<'info>,
 }
 
+/// Safe: custom constraint pins TokenAccount.owner (authority).
+#[derive(Accounts)]
+pub struct TransferCustomOwner<'info> {
+    pub user: Signer<'info>,
+    pub market: Account<'info, Market>,
+    #[account(
+        mut,
+        constraint = user_token_account.owner == user.key(),
+        constraint = user_token_account.mint == market.mint,
+    )]
+    pub user_token_account: Account<'info, TokenAccount>,
+}
+
+#[account]
+pub struct Market {
+    pub mint: Pubkey,
+}
+
 pub fn handler(_ctx: Context<TransferFull>, _amount: u64) -> Result<()> {
     Ok(())
 }
