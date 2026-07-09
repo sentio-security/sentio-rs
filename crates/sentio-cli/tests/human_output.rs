@@ -56,6 +56,7 @@ fn renders_detailed_human_report() {
         files_scanned: 1,
         files_parsed: 1,
         parse_failures: Vec::new(),
+        baselined_count: 0,
     };
 
     let mut output = Vec::new();
@@ -100,6 +101,7 @@ fn renders_human_report_with_ansi_color_when_enabled() {
         files_scanned: 1,
         files_parsed: 1,
         parse_failures: Vec::new(),
+        baselined_count: 0,
     };
 
     let mut output = Vec::new();

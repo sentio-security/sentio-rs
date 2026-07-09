@@ -1,0 +1,48 @@
+# Drop-in GitHub Actions workflow for Anchor workspaces.
+# Copy to .github/workflows/sentio.yml in your project.
+#
+# Privacy: sentio runs entirely on the runner — no source is uploaded
+# to third-party audit SaaS.
+
+name: sentio pre-audit
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: read
+  security-events: write # required to upload SARIF to Code Scanning
+
+jobs:
+  sentio:
+    name: sentio scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Use the composite action from this repo once published, or:
+      #   uses: sentio-security/sentio-rs/action@v0.3.0
+      # Until then, install from crates.io:
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install sentio
+        run: cargo install sentio-cli --locked
+
+      - name: Scan programs
+        run: |
+          sentio scan . \
+            --format sarif \
+            --output sentio.sarif \
+            --fail-on high
+        # Optional:
+        #   --config sentio.toml
+        #   --baseline .sentio/baseline.json
+
+      - name: Upload SARIF
+        if: always() && hashFiles('sentio.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: sentio.sarif
+          category: sentio

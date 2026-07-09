@@ -1,0 +1,28 @@
+# Example sentio project config.
+# Copy to sentio.toml in your Anchor workspace root and adjust.
+
+[scan]
+# Optional: only scan these subpaths (relative to the project root).
+# Leave empty or omit to use the path passed to `sentio scan`.
+# paths = ["programs"]
+
+# Skip paths whose components or full path match these patterns.
+# Supports simple * wildcards (e.g. "*/migrations/*").
+exclude = ["migrations", "idls"]
+
+# Include test/ and fixtures/ trees (default: false).
+include_tests = false
+
+# Exit 1 only when a finding meets this severity or higher.
+# Values: off | low | medium | high | critical
+# Recommended for CI: "high" so hygiene rules don't block merges.
+fail_on = "high"
+
+# Per-rule overrides (rule ids are case-insensitive).
+[rules.SW027]
+# Missing event on state change — useful in reports, noisy as a CI gate.
+enabled = false
+
+[rules.SW016]
+# init_if_needed is often intentional; demote if you accept the risk.
+severity = "low"

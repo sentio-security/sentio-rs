@@ -587,7 +587,7 @@ dependencies = [
 
 [[package]]
 name = "sentio-cli"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "anyhow",
  "clap",
@@ -600,11 +600,12 @@ dependencies = [
 
 [[package]]
 name = "sentio-core"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "proc-macro2",
  "quote",
  "serde",
+ "serde_json",
  "syn",
  "toml",
  "walkdir",

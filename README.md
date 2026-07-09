@@ -19,9 +19,11 @@
   </a>
 </p>
 
-**AST-based security scanner for Anchor programs.**
+**Local pre-audit layer for Anchor programs.**
 
 sentio scans Rust source files for common Solana vulnerability patterns using [`syn`](https://docs.rs/syn) — Rust's macro-safe AST parser. It understands Anchor account constraints, instruction logic, and CPI call graphs to produce high-signal findings with minimal false positives.
+
+**No build step. No source upload.** Point it at a program directory and run it in CI the same way you run tests.
 
 ---
 
@@ -34,13 +36,13 @@ cargo install sentio-cli
 # Verify installation
 sentio version
 
-# Scan your program
-sentio scan /path/to/your/anchor-program
+# Scan your program (60 seconds to first signal)
+sentio scan /path/to/your-anchor-workspace
 
-# Scan with JSON output (for CI pipelines)
-sentio scan . --format json
+# CI-friendly: only fail on high/critical, emit SARIF for Code Scanning
+sentio scan . --format sarif --output sentio.sarif --fail-on high
 
-# Export findings to a JSON file (pipe to AI or tooling)
+# JSON for tooling / agents
 sentio scan . --format json --output report.json
 
 # Run only one specific rule
@@ -49,6 +51,8 @@ sentio scan . --rule SW003
 # List all available rules
 sentio rules list
 ```
+
+Copy [`sentio.example.toml`](./sentio.example.toml) to `sentio.toml` in your workspace to configure excludes, fail thresholds, and per-rule overrides.
 
 ---
 
@@ -65,28 +69,85 @@ Commands:
 sentio scan [OPTIONS] [PATH]
 
 Arguments:
-  [PATH]              Directory or .rs file to scan [default: .]
+  [PATH]                    Directory or .rs file to scan [default: .]
 
 Options:
-  --format <FORMAT>   Output format: human (default) | json
-  --output <FILE>     Write JSON output to a file (requires --format json)
-  --rule <RULE_ID>    Run only a specific rule, e.g. --rule SW003
-  --include-tests     Include test files (excluded by default to reduce noise)
-  -h, --help          Print help
+  --format <FORMAT>         human (default) | json | sarif
+  --output <FILE>           Write json/sarif output to a file
+  --rule <RULE_ID>          Run only a specific rule, e.g. --rule SW003
+  --include-tests           Include test files (excluded by default)
+  --config <FILE>           Path to sentio.toml
+  --fail-on <LEVEL>         off | low | medium | high | critical
+  --baseline <FILE>         Hide findings present in this baseline JSON
+  --update-baseline <FILE>  Write current findings to a baseline file
+  -h, --help                Print help
 
 sentio rules list             Print all rule IDs and titles
 sentio version, -V, --version Print the installed version and check for a newer release
 ```
 
-`sentio version` (and `-V`/`--version`) make a brief network call to check for updates. A random anonymous ID is generated on first run and stored at `~/.config/sentio/telemetry_id` so repeated checks from the same machine don't get counted more than once. Set `SENTIO_NO_TELEMETRY=1` to disable this entirely. No source code, file paths, or scan results ever leave your machine — `scan` never makes network calls.
+`sentio version` (and `-V`/`--version`) make a brief network call to check for updates. A random anonymous ID is generated on first run and stored at `~/.config/sentio/telemetry_id` so repeated checks from the same machine don't get counted more than once. Set `SENTIO_NO_TELEMETRY=1` to disable this entirely. **No source code, file paths, or scan results ever leave your machine** — `scan` never makes network calls. That is intentional: unlike cloud auto-auditors, sentio is a local pre-audit gate.
 
 **Exit codes**
 
-| Code | Meaning                          |
-| ---- | -------------------------------- |
-| `0`  | No findings                      |
-| `1`  | One or more findings             |
+| Code | Meaning |
+| ---- | ------- |
+| `0`  | Clean, or only findings below `--fail-on` |
+| `1`  | One or more findings at or above `--fail-on` |
 | `2`  | Parse error in one or more files |
+
+---
+
+## Configuration (`sentio.toml`)
+
+Place `sentio.toml` in the scan root (or pass `--config`). CLI flags always override the file.
+
+```toml
+[scan]
+exclude = ["migrations", "idls"]
+include_tests = false
+fail_on = "high"          # recommended for CI
+
+[rules.SW027]
+enabled = false           # hygiene: report locally, don't gate PRs
+
+[rules.SW016]
+severity = "low"          # demote noisy-but-useful rules
+```
+
+See [`sentio.example.toml`](./sentio.example.toml) for a full annotated example.
+
+### Fail thresholds
+
+| `--fail-on` | Exit 1 when… |
+| ----------- | ------------ |
+| `off`       | Never (parse errors still exit 2) |
+| `low`       | Any finding (default, preserves historical CLI behavior) |
+| `medium`    | Medium, high, or critical |
+| `high`      | High or critical (good CI default) |
+| `critical`  | Critical only |
+
+### Baseline (only-new findings)
+
+Adopt sentio without boiling the ocean on day one:
+
+```bash
+# Capture current findings as accepted debt
+sentio scan . --update-baseline .sentio/baseline.json
+
+# Later: only surface regressions
+sentio scan . --baseline .sentio/baseline.json --fail-on high
+```
+
+Baseline identity is `rule_id + path + message` (line numbers are ignored so small refactors do not re-open accepted findings).
+
+### SARIF / GitHub Code Scanning
+
+```bash
+sentio scan . --format sarif --output sentio.sarif --fail-on high
+```
+
+Upload `sentio.sarif` with [`github/codeql-action/upload-sarif`](https://github.com/github/codeql-action). A ready-to-copy workflow lives in [`examples/github-workflow.yml`](./examples/github-workflow.yml). A composite Action is under [`action/`](./action/).
 
 ---
 
@@ -304,25 +365,25 @@ After all rule matches are collected, sentio runs a suppression pass. For each f
 
 ```
 sentio-rs/
+├── action/                              # Composite GitHub Action
+├── examples/github-workflow.yml         # Drop-in CI workflow
+├── sentio.example.toml                  # Annotated project config
 ├── crates/
 │   ├── sentio-core/
 │   │   ├── src/
 │   │   │   ├── anchor_accounts.rs       # Anchor #[account(...)] constraint parser
 │   │   │   ├── instruction_analysis.rs  # Guard / call / write extractor with CPI cross-reference
-│   │   │   ├── rules/
-│   │   │   │   └── anchor/              # One module per rule (SW001–SW021)
+│   │   │   ├── config.rs                # sentio.toml loader + fail-on
+│   │   │   ├── baseline.rs              # Only-new findings baseline
+│   │   │   ├── sarif.rs                 # SARIF 2.1.0 export
+│   │   │   ├── rules/                   # One module per rule
 │   │   │   ├── scanner.rs               # File walker + suppression pass
 │   │   │   └── syntax.rs                # syn parsing wrapper
 │   │   └── tests/
-│   │       ├── common/mod.rs            # Shared fixture helpers
 │   │       ├── fixtures/swXXX/          # risky.rs / safe.rs / suppressed.rs per rule
 │   │       └── rules_swXXX.rs           # Integration test per rule
 │   └── sentio-cli/
-│       ├── src/
-│       │   ├── lib.rs                   # Public formatter API (render_human_report, etc.)
-│       │   └── main.rs                  # CLI entry point (clap)
-│       └── tests/
-│           └── human_output.rs          # Formatter integration tests
+│       └── src/                         # CLI entry point + human formatter
 ```
 
 ---

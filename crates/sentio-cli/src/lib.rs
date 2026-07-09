@@ -27,7 +27,15 @@ pub fn render_human_report<W: Write>(
 
     if result.findings.is_empty() {
         if result.parse_failures.is_empty() {
-            writeln!(writer, "No findings.")?;
+            if result.baselined_count > 0 {
+                writeln!(
+                    writer,
+                    "No new findings. ({} baselined finding(s) hidden)",
+                    result.baselined_count
+                )?;
+            } else {
+                writeln!(writer, "No findings.")?;
+            }
         } else {
             writeln!(writer, "No findings in successfully parsed files.")?;
         }

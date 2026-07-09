@@ -1,0 +1,97 @@
+name: "sentio"
+description: "Local AST-based pre-audit scanner for Solana/Anchor programs (no source upload)"
+author: "sentio-security"
+branding:
+  icon: "shield"
+  color: "orange"
+
+inputs:
+  path:
+    description: "Directory or file to scan"
+    required: false
+    default: "."
+  fail-on:
+    description: "Fail when findings meet this severity or higher (off|low|medium|high|critical)"
+    required: false
+    default: "high"
+  config:
+    description: "Optional path to sentio.toml"
+    required: false
+    default: ""
+  baseline:
+    description: "Optional path to a baseline JSON file (only new findings fail)"
+    required: false
+    default: ""
+  format:
+    description: "Output format: human | json | sarif"
+    required: false
+    default: "sarif"
+  output:
+    description: "File to write results to (recommended for sarif/json)"
+    required: false
+    default: "sentio.sarif"
+  version:
+    description: "sentio-cli version to install from crates.io (empty = latest)"
+    required: false
+    default: ""
+  args:
+    description: "Extra arguments appended to `sentio scan`"
+    required: false
+    default: ""
+
+outputs:
+  output-file:
+    description: "Path to the written report file"
+    value: ${{ steps.run.outputs.output-file }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          ~/.cargo/bin
+        key: sentio-cli-${{ runner.os }}-${{ inputs.version || 'latest' }}
+
+    - name: Install sentio-cli
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ -n "${{ inputs.version }}" ]; then
+          cargo install sentio-cli --locked --version "${{ inputs.version }}" --force
+        else
+          cargo install sentio-cli --locked --force
+        fi
+
+    - name: Run sentio scan
+      id: run
+      shell: bash
+      run: |
+        set -euo pipefail
+        ARGS=(scan "${{ inputs.path }}" --format "${{ inputs.format }}" --fail-on "${{ inputs.fail-on }}")
+
+        if [ -n "${{ inputs.config }}" ]; then
+          ARGS+=(--config "${{ inputs.config }}")
+        fi
+        if [ -n "${{ inputs.baseline }}" ]; then
+          ARGS+=(--baseline "${{ inputs.baseline }}")
+        fi
+        if [ -n "${{ inputs.output }}" ]; then
+          ARGS+=(--output "${{ inputs.output }}")
+          echo "output-file=${{ inputs.output }}" >> "$GITHUB_OUTPUT"
+        fi
+
+        # shellcheck disable=SC2206
+        EXTRA=(${{ inputs.args }})
+        if [ ${#EXTRA[@]} -gt 0 ]; then
+          ARGS+=("${EXTRA[@]}")
+        fi
+
+        echo "Running: sentio ${ARGS[*]}"
+        sentio "${ARGS[@]}"

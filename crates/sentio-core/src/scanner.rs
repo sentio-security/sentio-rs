@@ -1,14 +1,25 @@
-use crate::finding::Finding;
+use crate::config::path_is_excluded;
+use crate::finding::{Finding, Severity};
 use crate::rules::{convert_severity, RuleContext, RuleRegistry, SuppressionSet};
 use crate::syntax::{parse_rust_files, ParseFailure, ParsedFile, SyntaxReport};
 use serde::Serialize;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
 #[derive(Debug, Clone, Default)]
 pub struct ScanOptions {
     pub include_tests: bool,
+    /// If set, only run this single rule id (e.g. `SW003`).
     pub rule_filter: Option<String>,
+    /// Rule ids that are disabled via config (uppercase).
+    pub disabled_rules: Vec<String>,
+    /// Per-rule severity overrides (uppercase rule id → severity).
+    pub severity_overrides: HashMap<String, Severity>,
+    /// Path exclude patterns (component name, substring, or simple `*` glob).
+    pub exclude: Vec<String>,
+    /// Optional extra roots relative to the scan path (from config `scan.paths`).
+    pub config_paths: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -17,6 +28,13 @@ pub struct ScanResult {
     pub files_scanned: usize,
     pub files_parsed: usize,
     pub parse_failures: Vec<ParseFailure>,
+    /// Findings hidden because they matched a baseline (informational).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub baselined_count: usize,
+}
+
+fn is_zero(n: &usize) -> bool {
+    *n == 0
 }
 
 #[derive(Default)]
@@ -31,8 +49,20 @@ impl Scanner {
         }
     }
 
+    pub fn rules(&self) -> &RuleRegistry {
+        &self.rules
+    }
+
     pub fn scan_path(&self, path: &str, options: &ScanOptions) -> ScanResult {
-        let (roots, anchor_programs) = resolve_scan_roots(path);
+        let target = PathBuf::from(path);
+
+        // Explicit single-file scan always includes that file (even under tests/).
+        if target.is_file() && target.extension().and_then(|ext| ext.to_str()) == Some("rs") {
+            let syntax_report = parse_rust_files(vec![target]);
+            return self.scan_report(1, syntax_report, options);
+        }
+
+        let (roots, anchor_programs) = resolve_scan_roots(path, options);
 
         if let Some(ref programs) = anchor_programs {
             eprintln!(
@@ -67,6 +97,7 @@ impl Scanner {
             files_scanned,
             files_parsed,
             parse_failures,
+            baselined_count: 0,
         }
     }
 
@@ -84,11 +115,22 @@ impl Scanner {
 
         let mut findings = Vec::new();
         for file in files {
-            for rule in self.rules.matching_rules(options.rule_filter.as_deref()) {
+            for rule in self
+                .rules
+                .matching_rules(options.rule_filter.as_deref(), &options.disabled_rules)
+            {
                 for matched in rule.match_file(file, &ctx) {
+                    let mut severity = convert_severity(matched.severity);
+                    if let Some(overridden) = options
+                        .severity_overrides
+                        .get(&matched.rule_id.to_ascii_uppercase())
+                    {
+                        severity = *overridden;
+                    }
+
                     let finding = Finding {
                         rule_id: matched.rule_id.to_string(),
-                        severity: convert_severity(matched.severity),
+                        severity,
                         message: matched.message,
                         location: matched.location,
                         help: matched.help,
@@ -111,8 +153,39 @@ impl Scanner {
 /// Detects an Anchor workspace at `path` by looking for `Anchor.toml`.
 /// If found, expands `[workspace] members` glob patterns and returns the program roots.
 /// Returns `(roots_to_scan, Some(program_names))` on detection, or `([path], None)` otherwise.
-fn resolve_scan_roots(path: &str) -> (Vec<PathBuf>, Option<Vec<String>>) {
+///
+/// When `options.config_paths` is non-empty, those subpaths (relative to `path`) are used
+/// as roots instead of full Anchor workspace expansion — unless they themselves contain
+/// Anchor programs.
+fn resolve_scan_roots(path: &str, options: &ScanOptions) -> (Vec<PathBuf>, Option<Vec<String>>) {
     let root = PathBuf::from(path);
+
+    if !options.config_paths.is_empty() {
+        let mut roots: Vec<PathBuf> = options
+            .config_paths
+            .iter()
+            .map(|p| {
+                let candidate = root.join(p);
+                if candidate.exists() {
+                    candidate
+                } else {
+                    PathBuf::from(p)
+                }
+            })
+            .filter(|p| p.exists())
+            .collect();
+        roots.sort();
+        roots.dedup();
+        if !roots.is_empty() {
+            let names: Vec<String> = roots
+                .iter()
+                .filter_map(|r| r.file_name())
+                .map(|n| n.to_string_lossy().into_owned())
+                .collect();
+            return (roots, Some(names));
+        }
+    }
+
     let anchor_toml_path = root.join("Anchor.toml");
 
     if !anchor_toml_path.exists() {
@@ -223,6 +296,7 @@ fn discover_rust_files<'a>(
         .filter(|entry| entry.file_type().is_file())
         .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("rs"))
         .filter(|entry| !is_excluded_path(entry.path()))
+        .filter(|entry| !path_is_excluded(entry.path(), &options.exclude))
         .filter(move |entry| options.include_tests || !is_test_path(entry.path()))
         .map(|entry| entry.into_path())
 }

@@ -84,7 +84,11 @@ impl RuleRegistry {
         &self.rules
     }
 
-    pub fn matching_rules(&self, rule_filter: Option<&str>) -> Vec<&dyn Rule> {
+    pub fn matching_rules(
+        &self,
+        rule_filter: Option<&str>,
+        disabled_rules: &[String],
+    ) -> Vec<&dyn Rule> {
         let filter = rule_filter
             .map(normalize_rule_id)
             .filter(|filter| !filter.is_empty());
@@ -93,9 +97,16 @@ impl RuleRegistry {
             .iter()
             .map(|rule| rule.as_ref())
             .filter(|rule| {
+                let id = rule.metadata().id;
+                if disabled_rules
+                    .iter()
+                    .any(|disabled| disabled.eq_ignore_ascii_case(id))
+                {
+                    return false;
+                }
                 filter
                     .as_ref()
-                    .is_none_or(|filter| rule.metadata().id.eq_ignore_ascii_case(filter))
+                    .is_none_or(|filter| id.eq_ignore_ascii_case(filter))
             })
             .collect()
     }
