@@ -4,20 +4,15 @@
   <img src="https://avatars.githubusercontent.com/u/282654001?s=200&v=4" alt="sentio" width="120" />
 </p>
 
-<p align="center">
-  <a href="https://crates.io/crates/sentio-cli">
-    <img src="https://img.shields.io/crates/v/sentio-cli?color=C4531A&label=sentio-cli" alt="crates.io version" />
-  </a>
-  <a href="https://crates.io/crates/sentio-core">
-    <img src="https://img.shields.io/crates/d/sentio-cli?color=6B4C3B&label=downloads" alt="crates.io downloads" />
-  </a>
-  <a href="https://crates.io/crates/sentio-core">
-    <img src="https://img.shields.io/crates/v/sentio-core?color=2C1810&label=sentio-core" alt="sentio-core version" />
-  </a>
-  <a href="https://github.com/sentio-security/sentio-rs/blob/main/LICENSE">
-    <img src="https://img.shields.io/crates/l/sentio-cli" alt="license" />
-  </a>
-</p>
+<div align="center">
+  <p>
+    <a href="https://crates.io/crates/sentio-cli"><img src="https://img.shields.io/crates/v/sentio-cli?color=C4531A&label=sentio-cli" alt="sentio-cli version" /></a>
+    <a href="https://crates.io/crates/sentio-core"><img src="https://img.shields.io/crates/d/sentio-cli?color=6B4C3B&label=downloads" alt="crates.io downloads" /></a>
+    <a href="https://crates.io/crates/sentio-core"><img src="https://img.shields.io/crates/v/sentio-core?color=2C1810&label=sentio-core" alt="sentio-core version" /></a>
+    <a href="https://github.com/sentio-security/sentio-rs/blob/main/LICENSE"><img src="https://img.shields.io/crates/l/sentio-cli" alt="license" /></a>
+  </p>
+
+</div>
 
 **Local pre-audit layer for Anchor programs.**
 
@@ -36,8 +31,8 @@ cargo install sentio-cli
 # Verify installation
 sentio version
 
-# Scan your program (60 seconds to first signal)
-sentio scan /path/to/your-anchor-workspace
+# Scan your program
+sentio scan .
 
 # CI-friendly: only fail on high/critical, emit SARIF for Code Scanning
 sentio scan . --format sarif --output sentio.sarif --fail-on high
