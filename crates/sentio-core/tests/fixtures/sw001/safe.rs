@@ -40,6 +40,16 @@ pub struct WithTreasury<'info> {
     pub vault: Account<'info, Vault>,
 }
 
+/// Safe: PDA authority (seeds + bump) is a seed-signer for CPI, not a tx Signer.
+#[derive(Accounts)]
+pub struct WithPdaAuthority<'info> {
+    /// CHECK: pool authority PDA
+    #[account(seeds = [b"authority", pool.key().as_ref()], bump)]
+    pub pool_authority: AccountInfo<'info>,
+    #[account(mut, seeds = [b"pool"], bump)]
+    pub pool: Account<'info, Vault>,
+}
+
 #[account]
 pub struct Vault {
     pub balance: u64,

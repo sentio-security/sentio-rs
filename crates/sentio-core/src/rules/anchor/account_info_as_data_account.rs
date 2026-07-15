@@ -29,12 +29,14 @@ impl Rule for AccountInfoAsDataAccountRule {
                 }
 
                 let c = &field.constraints;
+                // Seeds/bump alone mark a PDA address authority (often AccountInfo + /// CHECK),
+                // not a program data account — do not treat seeds as a data-account signal.
+                // Real data-account smells: init / init_if_needed / owner / address / has_one.
                 let looks_like_data_account = c.init
                     || c.init_if_needed
                     || c.owner
                     || c.address
-                    || !c.has_one.is_empty()
-                    || c.has_seeds;
+                    || !c.has_one.is_empty();
 
                 if !looks_like_data_account {
                     continue;
@@ -151,5 +153,69 @@ mod tests {
             },
         );
         assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn does_not_flag_pda_authority_with_seeds_only() {
+        // Seeds/bump alone are address constraints for a PDA signer, not data-account init.
+        let file = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+
+            #[derive(Accounts)]
+            pub struct Withdraw<'info> {
+                /// CHECK: Read only pool authority PDA
+                #[account(
+                    seeds = [
+                        pool.amm.as_ref(),
+                        mint_a.key().as_ref(),
+                        mint_b.key().as_ref(),
+                        b"authority",
+                    ],
+                    bump,
+                )]
+                pub pool_authority: AccountInfo<'info>,
+            }
+        "#,
+        );
+
+        let rule = AccountInfoAsDataAccountRule;
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
+        assert!(
+            findings.is_empty(),
+            "PDA AccountInfo with seeds must not be SW011: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn still_flags_account_info_with_init_even_if_seeds_present() {
+        let file = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+
+            #[derive(Accounts)]
+            pub struct Example<'info> {
+                #[account(init, payer = authority, space = 8 + 32, seeds = [b"vault"], bump)]
+                pub vault: AccountInfo<'info>,
+                pub authority: Signer<'info>,
+                pub system_program: Program<'info, System>,
+            }
+        "#,
+        );
+
+        let rule = AccountInfoAsDataAccountRule;
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].rule_id, "SW011");
     }
 }

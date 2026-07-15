@@ -77,6 +77,13 @@ impl Rule for MissingSignerCheckRule {
                     continue;
                 }
 
+                // PDA with seeds (+ bump): address is constrained by derivation.
+                // These are seed-signers for CPI (`invoke_signed`), not transaction signers —
+                // requiring Signer<'info> would be incorrect (e.g. pool_authority PDAs).
+                if c.has_seeds {
+                    continue;
+                }
+
                 // Explicit is_signer guard in any instruction handler body.
                 let has_signer_guard = signer_guarded_tokens.iter().any(|tok| tok == &field_name);
 
@@ -248,6 +255,63 @@ mod tests {
             pub struct Example<'info> {
                 pub treasury: AccountInfo<'info>,
                 pub vault: AccountInfo<'info>,
+            }
+        "#,
+        );
+
+        let rule = MissingSignerCheckRule;
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
+        assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn does_not_flag_pda_authority_with_seeds() {
+        // Classic AMM pool_authority: AccountInfo + seeds/bump, seed-signs CPIs.
+        let file = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+
+            #[derive(Accounts)]
+            pub struct Withdraw<'info> {
+                /// CHECK: PDA authority for pool vaults
+                #[account(
+                    seeds = [pool.key().as_ref(), b"authority"],
+                    bump,
+                )]
+                pub pool_authority: AccountInfo<'info>,
+                pub depositor: Signer<'info>,
+            }
+        "#,
+        );
+
+        let rule = MissingSignerCheckRule;
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
+        assert!(
+            findings.is_empty(),
+            "PDA seed-signer must not be flagged as missing signer: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn does_not_flag_admin_named_pda_with_seeds() {
+        let file = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+
+            #[derive(Accounts)]
+            pub struct Config<'info> {
+                #[account(seeds = [b"admin"], bump)]
+                pub admin: UncheckedAccount<'info>,
             }
         "#,
         );
