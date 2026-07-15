@@ -36,6 +36,16 @@ pub fn handler_loop(_ctx: Context<Deposit>) -> Result<()> {
     Ok(())
 }
 
+/// Safe: account fields cast to u128 before arithmetic (standard overflow pattern).
+pub fn handler_u128_widen(ctx: Context<Deposit>, amount: u64) -> Result<()> {
+    let _ = (amount as u128)
+        .checked_mul(ctx.accounts.vault.balance as u128)
+        .unwrap()
+        .checked_div(ctx.accounts.vault.balance as u128 + 100u128)
+        .unwrap() as u64;
+    Ok(())
+}
+
 #[account]
 pub struct Vault {
     pub balance: u64,
