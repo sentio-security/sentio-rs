@@ -30,6 +30,15 @@ impl Rule for InitIfNeededUsageRule {
                     continue;
                 }
 
+                // ATA-style init_if_needed (associated_token / token mint+authority) is a
+                // common UX pattern: fixed SPL layout, not custom program state that can
+                // be re-inited to reset balances. Flag program data accounts instead.
+                if field.constraints.has_token_mint_check()
+                    && field.constraints.has_token_authority_check()
+                {
+                    continue;
+                }
+
                 let field_name = field.ast.name.clone().unwrap_or_default();
                 findings.push(RuleMatch {
                     rule_id: "SW016",
@@ -122,5 +131,46 @@ mod tests {
             },
         );
         assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn does_not_flag_ata_init_if_needed() {
+        let file = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            use anchor_spl::associated_token::AssociatedToken;
+            use anchor_spl::token::{Mint, Token, TokenAccount};
+
+            #[derive(Accounts)]
+            pub struct Example<'info> {
+                #[account(
+                    init_if_needed,
+                    payer = payer,
+                    associated_token::mint = mint,
+                    associated_token::authority = owner,
+                )]
+                pub ata: Account<'info, TokenAccount>,
+                pub mint: Account<'info, Mint>,
+                pub owner: Signer<'info>,
+                #[account(mut)]
+                pub payer: Signer<'info>,
+                pub token_program: Program<'info, Token>,
+                pub associated_token_program: Program<'info, AssociatedToken>,
+                pub system_program: Program<'info, System>,
+            }
+            "#,
+        );
+
+        let rule = InitIfNeededUsageRule;
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
+        assert!(
+            findings.is_empty(),
+            "ATA init_if_needed should not be SW016: {findings:?}"
+        );
     }
 }

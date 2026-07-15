@@ -30,6 +30,7 @@ impl Rule for UnwrapOnResultRule {
         let mut collector = UnwrapCollector {
             findings: Vec::new(),
             in_test: false,
+            panic_nesting: 0,
         };
         visit::visit_file(&mut collector, &file.syntax);
 
@@ -58,6 +59,10 @@ impl Rule for UnwrapOnResultRule {
 struct UnwrapCollector {
     findings: Vec<(String, usize, usize)>,
     in_test: bool,
+    /// Depth of nested `.unwrap()` / `.expect()` while walking receivers.
+    /// Only the outermost call in a chain is reported (avoids double-counting
+    /// `checked_mul(...).unwrap().checked_div(...).unwrap()`).
+    panic_nesting: usize,
 }
 
 impl<'ast> Visit<'ast> for UnwrapCollector {
@@ -72,23 +77,35 @@ impl<'ast> Visit<'ast> for UnwrapCollector {
     }
 
     fn visit_expr_method_call(&mut self, node: &'ast ExprMethodCall) {
-        if !self.in_test {
-            let method = node.method.to_string();
-            if method == "unwrap" || method == "expect" {
+        let method = node.method.to_string();
+        let is_panic = method == "unwrap" || method == "expect";
+
+        if is_panic {
+            self.panic_nesting += 1;
+        }
+
+        // Walk children first so nested panics bump nesting before we decide.
+        self.visit_expr(&node.receiver);
+        for arg in &node.args {
+            self.visit_expr(arg);
+        }
+
+        if is_panic {
+            if !self.in_test && self.panic_nesting == 1 {
                 let receiver = node.receiver.to_token_stream().to_string();
                 let loc = node.span().start();
                 self.findings.push((
                     format!(
                         "`.{method}()` on `{}` will panic on None/Err; use `?` or \
                          `.ok_or(ErrorCode::...)?` instead",
-                        receiver.trim()
+                        receiver.split_whitespace().collect::<Vec<_>>().join(" ")
                     ),
                     loc.line,
                     loc.column + 1,
                 ));
             }
+            self.panic_nesting -= 1;
         }
-        visit::visit_expr_method_call(self, node);
     }
 }
 
@@ -198,5 +215,58 @@ mod tests {
             },
         );
         assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn dedupes_nested_unwrap_chain_to_one_finding() {
+        let file = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            pub fn handler(ctx: Context<Foo>, amount: u64) -> Result<()> {
+                let amount_a = (amount as u128)
+                    .checked_mul(ctx.accounts.pool.amount as u128)
+                    .unwrap()
+                    .checked_div(ctx.accounts.mint.supply as u128 + 100)
+                    .unwrap() as u64;
+                let _ = amount_a;
+                Ok(())
+            }
+            "#,
+        );
+        let rule = UnwrapOnResultRule;
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
+        assert_eq!(
+            findings.len(),
+            1,
+            "one finding for the whole unwrap chain, got: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn still_flags_separate_unwrap_statements() {
+        let file = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            pub fn handler(ctx: Context<Foo>, a: u64, b: u64) -> Result<()> {
+                let x = a.checked_add(1).unwrap();
+                let y = b.checked_mul(2).unwrap();
+                let _ = (x, y);
+                Ok(())
+            }
+            "#,
+        );
+        let rule = UnwrapOnResultRule;
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
+        assert_eq!(findings.len(), 2);
     }
 }
