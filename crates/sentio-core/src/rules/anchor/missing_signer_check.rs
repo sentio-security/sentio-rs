@@ -1,6 +1,6 @@
 use crate::anchor_accounts::{collect_anchor_accounts_index, AnchorFieldTypeKind};
 use crate::finding::SourceLocation;
-use crate::instruction_analysis::collect_instruction_index;
+use crate::instruction_analysis::{analyze_account_field_usage, collect_instruction_index};
 use crate::rules::{Rule, RuleContext, RuleMatch, RuleMetadata, RuleSeverity};
 use crate::syntax::ParsedFile;
 
@@ -81,6 +81,15 @@ impl Rule for MissingSignerCheckRule {
                 // These are seed-signers for CPI (`invoke_signed`), not transaction signers —
                 // requiring Signer<'info> would be incorrect (e.g. pool_authority PDAs).
                 if c.has_seeds {
+                    continue;
+                }
+
+                // Stored-pubkey only (e.g. `state.admin = ctx.accounts.admin.key()`):
+                // not a live signer authority — do not require Signer / is_signer.
+                // Require !mut so we don't suppress accounts that can still be mutated.
+                if !c.is_mut
+                    && analyze_account_field_usage(&file.syntax, &field_name).is_pubkey_only()
+                {
                     continue;
                 }
 
@@ -324,5 +333,53 @@ mod tests {
             },
         );
         assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn does_not_flag_admin_stored_as_pubkey_only() {
+        // create_amm-style: admin is only copied via .key() into state.
+        let file = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+
+            #[derive(Accounts)]
+            pub struct CreateAmm<'info> {
+                #[account(init, payer = payer, space = 8 + 64)]
+                pub amm: Account<'info, Amm>,
+                /// CHECK: Read only, delegatable creation
+                pub admin: AccountInfo<'info>,
+                #[account(mut)]
+                pub payer: Signer<'info>,
+                pub system_program: Program<'info, System>,
+            }
+
+            pub fn create_amm(ctx: Context<CreateAmm>, id: Pubkey, fee: u16) -> Result<()> {
+                let amm = &mut ctx.accounts.amm;
+                amm.id = id;
+                amm.admin = ctx.accounts.admin.key();
+                amm.fee = fee;
+                Ok(())
+            }
+
+            #[account]
+            pub struct Amm {
+                pub id: Pubkey,
+                pub admin: Pubkey,
+                pub fee: u16,
+            }
+        "#,
+        );
+
+        let rule = MissingSignerCheckRule;
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
+        assert!(
+            findings.is_empty(),
+            "stored-pubkey admin must not be SW001: {findings:?}"
+        );
     }
 }

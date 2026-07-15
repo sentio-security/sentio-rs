@@ -1,6 +1,6 @@
 use crate::anchor_accounts::{collect_anchor_accounts_index, AnchorFieldTypeKind};
 use crate::finding::SourceLocation;
-use crate::instruction_analysis::collect_instruction_index;
+use crate::instruction_analysis::{analyze_account_field_usage, collect_instruction_index};
 use crate::rules::{Rule, RuleContext, RuleMatch, RuleMetadata, RuleSeverity};
 use crate::syntax::ParsedFile;
 
@@ -65,6 +65,14 @@ impl Rule for MissingOwnerCheckRule {
                 let is_program_field = field_name.to_lowercase().contains("program");
 
                 if is_data_account || is_program_field {
+                    continue;
+                }
+
+                // Stored-pubkey only: only `.key()` is read (e.g. copy admin into state).
+                // Owner of that account is irrelevant — any pubkey may be passed by design.
+                if !c.is_mut
+                    && analyze_account_field_usage(&file.syntax, &field_name).is_pubkey_only()
+                {
                     continue;
                 }
 
@@ -221,5 +229,47 @@ mod tests {
             },
         );
         assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn does_not_flag_admin_stored_as_pubkey_only() {
+        let file = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+
+            #[derive(Accounts)]
+            pub struct CreateAmm<'info> {
+                #[account(init, payer = payer, space = 8 + 64)]
+                pub amm: Account<'info, Amm>,
+                /// CHECK: Read only, delegatable creation
+                pub admin: AccountInfo<'info>,
+                #[account(mut)]
+                pub payer: Signer<'info>,
+                pub system_program: Program<'info, System>,
+            }
+
+            pub fn create_amm(ctx: Context<CreateAmm>) -> Result<()> {
+                ctx.accounts.amm.admin = ctx.accounts.admin.key();
+                Ok(())
+            }
+
+            #[account]
+            pub struct Amm {
+                pub admin: Pubkey,
+            }
+        "#,
+        );
+
+        let rule = MissingOwnerCheckRule;
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
+        assert!(
+            findings.is_empty(),
+            "stored-pubkey admin must not be SW002: {findings:?}"
+        );
     }
 }

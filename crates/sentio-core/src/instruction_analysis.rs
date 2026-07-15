@@ -525,6 +525,107 @@ fn extract_account_name_from_str(s: &str) -> Option<String> {
     }
 }
 
+/// How an Accounts field is used in instruction bodies in this file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct AccountFieldUsage {
+    /// Occurrences of `ctx.accounts.<field>.key()` (pubkey read only).
+    pub key_reads: usize,
+    /// Any other use (CPI, data/lamports/owner, bare pass-through, etc.).
+    pub other_uses: usize,
+}
+
+impl AccountFieldUsage {
+    /// True when the field is only read as a pubkey (typical "store admin key" pattern).
+    /// Requires at least one `.key()` so unused fields are not silently suppressed.
+    pub fn is_pubkey_only(&self) -> bool {
+        self.key_reads > 0 && self.other_uses == 0
+    }
+}
+
+/// Analyze how `field_name` is used under `*.accounts.<field>` in this file's function bodies.
+///
+/// Used to suppress SW001/SW002 when an AccountInfo is only a stored pubkey source
+/// (e.g. `amm.admin = ctx.accounts.admin.key()`), not a data/CPI/signer authority.
+pub fn analyze_account_field_usage(file: &syn::File, field_name: &str) -> AccountFieldUsage {
+    let mut visitor = AccountFieldUsageVisitor {
+        field_name,
+        usage: AccountFieldUsage::default(),
+    };
+    visitor.visit_file(file);
+    visitor.usage
+}
+
+struct AccountFieldUsageVisitor<'a> {
+    field_name: &'a str,
+    usage: AccountFieldUsage,
+}
+
+impl<'ast> Visit<'ast> for AccountFieldUsageVisitor<'_> {
+    fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
+        if let Some(name) = accounts_field_from_expr(&node.receiver) {
+            if name == self.field_name {
+                if node.method == "key" {
+                    self.usage.key_reads += 1;
+                    // Skip receiver so the nested field path is not counted as `other`.
+                    for arg in &node.args {
+                        self.visit_expr(arg);
+                    }
+                    return;
+                }
+                // e.g. .lamports(), .try_borrow_data(), .to_account_info(), .owner
+                self.usage.other_uses += 1;
+            }
+        }
+        visit::visit_expr_method_call(self, node);
+    }
+
+    fn visit_expr_field(&mut self, node: &'ast syn::ExprField) {
+        if let syn::Member::Named(ident) = &node.member {
+            if ident == self.field_name && expr_is_accounts_path(&node.base) {
+                // Bare `ctx.accounts.field` (not handled as `.key()` method receiver).
+                self.usage.other_uses += 1;
+            }
+        }
+        visit::visit_expr_field(self, node);
+    }
+}
+
+/// `ctx.accounts.foo` / `accounts.foo` / `self.accounts.foo` → Some("foo")
+fn accounts_field_from_expr(expr: &syn::Expr) -> Option<String> {
+    let syn::Expr::Field(field) = expr else {
+        return None;
+    };
+    let syn::Member::Named(ident) = &field.member else {
+        return None;
+    };
+    if expr_is_accounts_path(&field.base) {
+        Some(ident.to_string())
+    } else {
+        None
+    }
+}
+
+/// True when `expr` is a path ending in `accounts` (optionally via `ctx` / `self` / etc.).
+fn expr_is_accounts_path(expr: &syn::Expr) -> bool {
+    match expr {
+        syn::Expr::Path(p) => p
+            .path
+            .segments
+            .last()
+            .is_some_and(|s| s.ident == "accounts"),
+        syn::Expr::Field(f) => {
+            if let syn::Member::Named(ident) = &f.member {
+                ident == "accounts"
+            } else {
+                false
+            }
+        }
+        syn::Expr::Paren(p) => expr_is_accounts_path(&p.expr),
+        syn::Expr::Reference(r) => expr_is_accounts_path(&r.expr),
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -650,5 +751,38 @@ mod tests {
         assert!(guard.expression.contains("=="));
         assert!(guard.references_owner);
         assert!(guard.references_key);
+    }
+
+    #[test]
+    fn detects_pubkey_only_admin_store_pattern() {
+        let file = parse_file(
+            r#"
+            pub fn create_amm(ctx: Context<CreateAmm>, id: Pubkey, fee: u16) -> Result<()> {
+                let amm = &mut ctx.accounts.amm;
+                amm.id = id;
+                amm.admin = ctx.accounts.admin.key();
+                amm.fee = fee;
+                Ok(())
+            }
+            "#,
+        );
+        let usage = analyze_account_field_usage(&file, "admin");
+        assert!(usage.is_pubkey_only(), "{usage:?}");
+    }
+
+    #[test]
+    fn detects_non_key_use_of_account_info() {
+        let file = parse_file(
+            r#"
+            pub fn handler(ctx: Context<Withdraw>) -> Result<()> {
+                let lamports = ctx.accounts.vault.lamports();
+                msg!("vault lamports: {}", lamports);
+                Ok(())
+            }
+            "#,
+        );
+        let usage = analyze_account_field_usage(&file, "vault");
+        assert!(!usage.is_pubkey_only(), "{usage:?}");
+        assert!(usage.other_uses > 0);
     }
 }
