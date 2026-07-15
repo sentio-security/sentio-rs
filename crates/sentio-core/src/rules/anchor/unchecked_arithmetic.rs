@@ -123,12 +123,9 @@ fn expr_has_field_access(expr: &Expr) -> bool {
         Expr::Try(t) => expr_has_field_access(&t.expr),
         Expr::MethodCall(m) => {
             // `pool.amount.checked_add(x)` — field is on the receiver path
-            expr_has_field_access(&m.receiver)
-                || m.args.iter().any(expr_has_field_access)
+            expr_has_field_access(&m.receiver) || m.args.iter().any(expr_has_field_access)
         }
-        Expr::Call(c) => {
-            expr_has_field_access(&c.func) || c.args.iter().any(expr_has_field_access)
-        }
+        Expr::Call(c) => expr_has_field_access(&c.func) || c.args.iter().any(expr_has_field_access),
         Expr::Binary(b) => expr_has_field_access(&b.left) || expr_has_field_access(&b.right),
         Expr::Path(_) | Expr::Lit(_) => false,
         _ => {

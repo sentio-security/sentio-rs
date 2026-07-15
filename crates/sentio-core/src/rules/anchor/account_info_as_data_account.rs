@@ -32,11 +32,8 @@ impl Rule for AccountInfoAsDataAccountRule {
                 // Seeds/bump alone mark a PDA address authority (often AccountInfo + /// CHECK),
                 // not a program data account — do not treat seeds as a data-account signal.
                 // Real data-account smells: init / init_if_needed / owner / address / has_one.
-                let looks_like_data_account = c.init
-                    || c.init_if_needed
-                    || c.owner
-                    || c.address
-                    || !c.has_one.is_empty();
+                let looks_like_data_account =
+                    c.init || c.init_if_needed || c.owner || c.address || !c.has_one.is_empty();
 
                 if !looks_like_data_account {
                     continue;
