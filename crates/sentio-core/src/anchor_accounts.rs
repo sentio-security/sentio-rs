@@ -270,27 +270,56 @@ impl AnchorFieldConstraints {
                     .is_some_and(constraint_expr_checks_token_owner)
         })
     }
+
+    /// True when identity is pinned via `address =`, `owner =`, or custom
+    /// `constraint = account.key() == stored_pubkey` / `constraint = account.owner == …`.
+    ///
+    /// Address equality is sufficient for payout destinations and other
+    /// "must be this pubkey" accounts; program-owner checks are the other SW002 path.
+    pub fn has_owner_or_address_check(&self) -> bool {
+        if self.owner || self.address {
+            return true;
+        }
+        self.items.iter().any(|c| {
+            c.kind == AnchorConstraintKind::Constraint
+                && c.value.as_deref().is_some_and(|v| {
+                    constraint_expr_checks_key_identity(v)
+                        || constraint_expr_checks_account_owner(v)
+                })
+        })
+    }
 }
 
 /// `foo.mint == bar.mint` / `foo.mint == mint.key()` style checks.
 fn constraint_expr_checks_token_mint(expr: &str) -> bool {
-    let n: String = expr
-        .chars()
-        .filter(|c| !c.is_whitespace())
-        .collect::<String>()
-        .to_ascii_lowercase();
+    let n = normalize_constraint_expr(expr);
     n.contains(".mint==") || n.contains("==") && n.contains(".mint")
 }
 
 /// `foo.owner == user.key()` / `foo.owner == market.key()` style checks.
 /// (SPL TokenAccount.owner is the authority.)
 fn constraint_expr_checks_token_owner(expr: &str) -> bool {
-    let n: String = expr
-        .chars()
+    constraint_expr_checks_account_owner(expr)
+}
+
+/// `AccountInfo` / `UncheckedAccount` program-owner field, or token authority field.
+fn constraint_expr_checks_account_owner(expr: &str) -> bool {
+    let n = normalize_constraint_expr(expr);
+    n.contains(".owner==") || n.contains("==") && n.contains(".owner")
+}
+
+/// `team_wallet.key() == team_config.team_wallet` style identity pins.
+fn constraint_expr_checks_key_identity(expr: &str) -> bool {
+    let n = normalize_constraint_expr(expr);
+    // `.key()==` covers `foo.key() == bar`; also `bar == foo.key()`.
+    n.contains(".key()==") || (n.contains("==") && n.contains(".key()"))
+}
+
+fn normalize_constraint_expr(expr: &str) -> String {
+    expr.chars()
         .filter(|c| !c.is_whitespace())
         .collect::<String>()
-        .to_ascii_lowercase();
-    n.contains(".owner==") || n.contains("==") && n.contains(".owner")
+        .to_ascii_lowercase()
 }
 
 // function related to constraints

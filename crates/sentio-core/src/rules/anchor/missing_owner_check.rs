@@ -54,8 +54,9 @@ impl Rule for MissingOwnerCheckRule {
                 let field_name = field.ast.name.as_deref().unwrap_or("").to_string();
                 let c = &field.constraints;
 
-                // Skip if the constraint layer already enforces owner/address.
-                if c.owner || c.address {
+                // Skip if owner/address is pinned — including custom
+                // `constraint = account.key() == stored` (address identity).
+                if c.has_owner_or_address_check() {
                     continue;
                 }
 
@@ -270,6 +271,70 @@ mod tests {
         assert!(
             findings.is_empty(),
             "stored-pubkey admin must not be SW002: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn does_not_flag_custom_key_equality_constraint() {
+        // Odomart FP: payout destination pinned to stored pubkey — address identity.
+        let file = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+
+            #[derive(Accounts)]
+            pub struct WithdrawTeamFees<'info> {
+                pub team_config: Account<'info, TeamConfig>,
+                #[account(
+                    constraint = team_wallet.key() == team_config.team_wallet @ RiseError::InvalidTeamWallet
+                )]
+                pub team_wallet: UncheckedAccount<'info>,
+            }
+
+            #[account]
+            pub struct TeamConfig {
+                pub team_wallet: Pubkey,
+            }
+        "#,
+        );
+
+        let rule = MissingOwnerCheckRule;
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
+        assert!(
+            findings.is_empty(),
+            "key() == stored pubkey must not be SW002: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn does_not_flag_custom_owner_equality_constraint() {
+        let file = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+
+            #[derive(Accounts)]
+            pub struct Example<'info> {
+                #[account(constraint = vault.owner == &token_program.key())]
+                pub vault: AccountInfo<'info>,
+                pub token_program: AccountInfo<'info>,
+            }
+        "#,
+        );
+
+        let rule = MissingOwnerCheckRule;
+        let findings = rule.match_file(
+            &file,
+            &RuleContext {
+                files: std::slice::from_ref(&file),
+            },
+        );
+        assert!(
+            findings.is_empty(),
+            "custom .owner == must not be SW002: {findings:?}"
         );
     }
 }

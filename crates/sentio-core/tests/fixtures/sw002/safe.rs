@@ -35,3 +35,23 @@ pub fn create_config(ctx: Context<CreateConfig>) -> Result<()> {
 pub struct Config {
     pub admin: Pubkey,
 }
+
+/// Safe: custom constraint pins UncheckedAccount to a stored pubkey (address identity).
+#[derive(Accounts)]
+pub struct WithdrawTeamFees<'info> {
+    pub team_config: Account<'info, TeamConfig>,
+    #[account(
+        constraint = team_wallet.key() == team_config.team_wallet @ ErrorCode::InvalidTeamWallet
+    )]
+    pub team_wallet: UncheckedAccount<'info>,
+}
+
+#[account]
+pub struct TeamConfig {
+    pub team_wallet: Pubkey,
+}
+
+#[error_code]
+pub enum ErrorCode {
+    InvalidTeamWallet,
+}

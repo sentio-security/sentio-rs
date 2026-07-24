@@ -7,47 +7,49 @@
 <div align="center">
   <p>
     <a href="https://crates.io/crates/sentio-cli"><img src="https://img.shields.io/crates/v/sentio-cli?color=C4531A&label=sentio-cli" alt="sentio-cli version" /></a>
-    <a href="https://crates.io/crates/sentio-core"><img src="https://img.shields.io/crates/d/sentio-cli?color=6B4C3B&label=downloads" alt="crates.io downloads" /></a>
+    <a href="https://crates.io/crates/sentio-cli"><img src="https://img.shields.io/crates/d/sentio-cli?color=6B4C3B&label=downloads" alt="crates.io downloads" /></a>
     <a href="https://crates.io/crates/sentio-core"><img src="https://img.shields.io/crates/v/sentio-core?color=2C1810&label=sentio-core" alt="sentio-core version" /></a>
     <a href="https://github.com/sentio-security/sentio-rs/blob/main/LICENSE"><img src="https://img.shields.io/crates/l/sentio-cli" alt="license" /></a>
   </p>
-
 </div>
 
-**Local pre-audit layer for Anchor programs.**
-
-sentio scans Rust source files for common Solana vulnerability patterns using [`syn`](https://docs.rs/syn) — Rust's macro-safe AST parser. It understands Anchor account constraints, instruction logic, and CPI call graphs to produce high-signal findings with minimal false positives.
-
-**No build step. No source upload.** Point it at a program directory and run it in CI the same way you run tests.
+<p align="center"><strong>Local pre-audit for Anchor programs. No build. No source upload.</strong></p>
 
 ---
 
-## Quick Start
+## 2 steps · ~1 minute
 
 ```bash
-# Install
 cargo install sentio-cli
+sentio scan .
+```
 
-# Verify installation
+That's it. Run from your Anchor workspace root (where `Anchor.toml` lives).
+
+<p align="center">
+  <img src="assets/demo.gif" alt="sentio scan demo" width="720" />
+</p>
+
+---
+
+## More commands
+
+```bash
 sentio version
 
-# Scan your program
-sentio scan .
-
-# CI-friendly: only fail on high/critical, emit SARIF for Code Scanning
+# CI: fail on high/critical, emit SARIF for Code Scanning
 sentio scan . --format sarif --output sentio.sarif --fail-on high
 
 # JSON for tooling / agents
 sentio scan . --format json --output report.json
 
-# Run only one specific rule
+# One rule only
 sentio scan . --rule SW003
 
-# List all available rules
 sentio rules list
 ```
 
-Copy [`sentio.example.toml`](./sentio.example.toml) to `sentio.toml` in your workspace to configure excludes, fail thresholds, and per-rule overrides.
+Copy [`sentio.example.toml`](./sentio.example.toml) to `sentio.toml` for excludes, fail thresholds, and per-rule overrides.
 
 ---
 
