@@ -17,7 +17,7 @@
 
 ---
 
-## 2 steps · ~1 minute
+## 2 steps · 1 minute
 
 ```bash
 cargo install sentio-cli
