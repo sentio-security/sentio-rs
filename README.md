@@ -400,11 +400,3 @@ sentio-rs/
 **Precision over recall.** A false positive wastes an auditor's time and erodes trust in the tool. Every rule ships with a real-program validation pass. When precision cannot be guaranteed, rules are flagged as `manual review` rather than treated as confirmed vulnerabilities.
 
 **No compiler dependency.** sentio works on raw `.rs` source files. No `rustc_private`, no proc-macro expansion, no `cargo build` needed. Point it at any Solana program directory and it works.
-
----
-
-## Status
-
-sentio is under active development. The rule set is growing; the AST infrastructure is stable.
-
-**22 rules ship today** covering the most common Solana/Anchor vulnerability classes. Native Solana (non-Anchor) rule support is on the roadmap.
