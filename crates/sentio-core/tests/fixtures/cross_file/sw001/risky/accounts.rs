@@ -1,4 +1,4 @@
-//! Phase 0 fixture: Accounts struct lives in a separate file from the handler.
+//! Cross-file fixture: Accounts struct lives apart from the handler.
 //! Risky: authority is AccountInfo with no signer constraint.
 use anchor_lang::prelude::*;
 

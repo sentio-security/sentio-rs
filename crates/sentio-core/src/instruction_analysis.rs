@@ -751,11 +751,7 @@ fn first_generic_type(arguments: &PathArguments) -> Option<&Type> {
 
 fn type_last_path_ident(ty: &Type) -> Option<String> {
     match ty {
-        Type::Path(type_path) => type_path
-            .path
-            .segments
-            .last()
-            .map(|s| s.ident.to_string()),
+        Type::Path(type_path) => type_path.path.segments.last().map(|s| s.ident.to_string()),
         Type::Reference(r) => type_last_path_ident(&r.elem),
         Type::Paren(p) => type_last_path_ident(&p.elem),
         Type::Group(g) => type_last_path_ident(&g.elem),

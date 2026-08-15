@@ -1,5 +1,5 @@
-//! Phase 0 fixture: same split layout as risky, but authority remains AccountInfo
-//! (guard lives in the handler file — proves cross-file signer evidence).
+//! Cross-file fixture: same split layout as risky; authority remains AccountInfo
+//! (signer guard lives in the handler file).
 use anchor_lang::prelude::*;
 
 #[derive(Accounts)]
