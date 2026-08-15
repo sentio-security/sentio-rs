@@ -1,3 +1,4 @@
+use crate::cargo_profile::release_overflow_checks_enabled;
 use crate::finding::SourceLocation;
 use crate::rules::{Rule, RuleContext, RuleMatch, RuleMetadata, RuleSeverity};
 use crate::syntax::ParsedFile;
@@ -16,16 +17,24 @@ impl Rule for UncheckedArithmeticRule {
             title: "Unchecked arithmetic",
             severity: RuleSeverity::High,
             description: "Detects unchecked +, -, * on account data with a non-trivial (variable \
-                or non-unit) delta that can silently overflow/underflow in release builds. \
-                Focuses on economically relevant steps (e.g. user-controlled `amount`), not \
-                unit counter bumps like `count += 1` which are not practical overflow attacks.",
+                or non-unit) delta that can silently overflow/underflow in release builds when \
+                `[profile.release] overflow-checks` is off (Rust default). Focuses on \
+                economically relevant steps (e.g. user-controlled `amount`), not unit counter \
+                bumps like `count += 1`. Suppressed when the package enables release overflow-checks.",
             fix_guidance: "Use checked_add(), checked_sub(), or checked_mul() and propagate \
-                the error with ?, or use saturating_add()/saturating_sub() when wrapping is intentional.",
+                the error with ?, or use saturating_add()/saturating_sub() when wrapping is intentional. \
+                Alternatively set `[profile.release] overflow-checks = true` so overflow panics in release.",
         };
         &METADATA
     }
 
     fn match_file(&self, file: &ParsedFile, _ctx: &RuleContext<'_>) -> Vec<RuleMatch> {
+        // Mature protocols often enable panic-on-overflow in release; raw += then does
+        // *not* wrap, so "can overflow in release builds" would be a false claim.
+        if release_overflow_checks_enabled(&file.path) {
+            return Vec::new();
+        }
+
         let mut collector = ArithmeticCollector {
             findings: Vec::new(),
         };
@@ -46,7 +55,8 @@ impl Rule for UncheckedArithmeticRule {
                 help: Some(
                     "Replace `x += y` with `x = x.checked_add(y).ok_or(ErrorCode::Overflow)?` \
                     when `y` is variable or non-unit. Unit steps like `count += 1` are lower risk; \
-                    still prefer checked math for money/supply fields."
+                    still prefer checked math for money/supply fields. Or enable \
+                    `[profile.release] overflow-checks = true`."
                         .to_string(),
                 ),
             })
@@ -465,5 +475,41 @@ mod tests {
         "#,
         );
         assert_eq!(run(&file).len(), 1);
+    }
+
+    #[test]
+    fn suppresses_when_release_overflow_checks_enabled() {
+        use std::fs;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let n = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("sentio-sw005-overflow-{n}"));
+        fs::create_dir_all(dir.join("src")).unwrap();
+        fs::write(
+            dir.join("Cargo.toml"),
+            "[package]\nname = \"hardened\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[profile.release]\noverflow-checks = true\n",
+        )
+        .unwrap();
+        let lib = dir.join("src/lib.rs");
+        fs::write(
+            &lib,
+            "use anchor_lang::prelude::*;\npub fn handler(ctx: Context<Deposit>, amount: u64) -> Result<()> {\n    ctx.accounts.vault.balance += amount;\n    Ok(())\n}\n",
+        )
+        .unwrap();
+
+        let source = fs::read_to_string(&lib).unwrap();
+        let file = ParsedFile {
+            path: lib.clone(),
+            syntax: syn::parse_file(&source).unwrap(),
+            source,
+        };
+        assert!(
+            run(&file).is_empty(),
+            "SW005 must not fire when overflow-checks = true"
+        );
+        fs::remove_dir_all(dir).ok();
     }
 }

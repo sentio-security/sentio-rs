@@ -1,6 +1,7 @@
 pub mod anchor_accounts;
 pub mod ast_index;
 pub mod baseline;
+pub mod cargo_profile;
 pub mod config;
 pub mod finding;
 pub mod instruction_analysis;
@@ -17,6 +18,7 @@ pub use anchor_accounts::{
 };
 pub use ast_index::{collect_ast_index, AstAttr, AstField, AstIndex, AstSpan, AstStruct};
 pub use baseline::{Baseline, BaselineEntry};
+pub use cargo_profile::release_overflow_checks_enabled;
 pub use config::{
     path_is_excluded, resolve_config_path, FailOn, RuleSection, ScanSection, SentioConfig,
 };
