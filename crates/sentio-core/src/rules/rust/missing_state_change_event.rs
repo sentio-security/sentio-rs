@@ -107,10 +107,8 @@ mod tests {
             "#,
         );
         let rule = MissingStateChangeEventRule;
-        let findings = rule.match_file(
-            &file,
-            &RuleContext::files_only(std::slice::from_ref(&file)),
-        );
+        let findings =
+            rule.match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].rule_id, "SW027");
     }
@@ -128,10 +126,8 @@ mod tests {
             "#,
         );
         let rule = MissingStateChangeEventRule;
-        let findings = rule.match_file(
-            &file,
-            &RuleContext::files_only(std::slice::from_ref(&file)),
-        );
+        let findings =
+            rule.match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
         assert!(findings.is_empty());
     }
 
@@ -146,10 +142,8 @@ mod tests {
             "#,
         );
         let rule = MissingStateChangeEventRule;
-        let findings = rule.match_file(
-            &file,
-            &RuleContext::files_only(std::slice::from_ref(&file)),
-        );
+        let findings =
+            rule.match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
         assert!(findings.is_empty());
     }
 
@@ -167,10 +161,8 @@ mod tests {
             "#,
         );
         let rule = MissingStateChangeEventRule;
-        let findings = rule.match_file(
-            &file,
-            &RuleContext::files_only(std::slice::from_ref(&file)),
-        );
+        let findings =
+            rule.match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
         assert!(
             findings.is_empty(),
             "msg! should count as observability: {findings:?}"

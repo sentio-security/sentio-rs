@@ -1,9 +1,7 @@
 //! Cross-file foundation: link `Context<Deposit>` handlers to `#[derive(Accounts)]`
 //! structs defined in other files. Not full cross-program CPI analysis.
 
-use crate::anchor_accounts::{
-    collect_anchor_accounts_index, AnchorAccountsStruct,
-};
+use crate::anchor_accounts::{collect_anchor_accounts_index, AnchorAccountsStruct};
 use crate::instruction_analysis::{collect_instruction_index, InstructionFunction};
 use crate::syntax::ParsedFile;
 use std::collections::HashMap;
@@ -187,7 +185,10 @@ mod tests {
             "#,
         );
         let index = GlobalIndex::from_syn_files(&[&a, &b]);
-        assert!(index.duplicate_accounts_names.iter().any(|n| n == "Deposit"));
+        assert!(index
+            .duplicate_accounts_names
+            .iter()
+            .any(|n| n == "Deposit"));
         let dep = index.accounts("Deposit").expect("Deposit");
         // First file: AccountInfo, not Signer
         assert_eq!(dep.fields.len(), 1);

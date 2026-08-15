@@ -65,10 +65,7 @@ fn safe_deposit_links_struct_and_has_signer_guard() {
 #[test]
 fn global_index_links_split_safe_fixture() {
     let base = common::fixture_path("cross_file/sw001/safe");
-    let report = parse_rust_files([
-        base.join("accounts.rs"),
-        base.join("deposit.rs"),
-    ]);
+    let report = parse_rust_files([base.join("accounts.rs"), base.join("deposit.rs")]);
     assert_eq!(report.files.len(), 2, "both fixture files must parse");
 
     let index = GlobalIndex::from_parsed_files(&report.files);

@@ -259,10 +259,8 @@ mod tests {
     }
 
     fn run(file: &ParsedFile) -> Vec<RuleMatch> {
-        UncheckedArithmeticRule.match_file(
-            file,
-            &RuleContext::files_only(std::slice::from_ref(file)),
-        )
+        UncheckedArithmeticRule
+            .match_file(file, &RuleContext::files_only(std::slice::from_ref(file)))
     }
 
     #[test]
