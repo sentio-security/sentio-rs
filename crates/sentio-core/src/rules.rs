@@ -3,9 +3,11 @@ pub mod math;
 pub mod rust;
 
 use crate::finding::{Finding, Severity, SourceLocation};
+use crate::global_index::GlobalIndex;
 use crate::syntax::ParsedFile;
 use serde::Serialize;
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -39,9 +41,34 @@ pub trait Rule {
     fn match_file(&self, file: &ParsedFile, ctx: &RuleContext<'_>) -> Vec<RuleMatch>;
 }
 
+/// Shared empty index for unit tests that only exercise single-file rule logic.
+static EMPTY_GLOBAL_INDEX: LazyLock<GlobalIndex> = LazyLock::new(GlobalIndex::empty);
+
+/// Per-scan context passed to every rule.
+///
+/// `global` is built once for the whole workspace so rules can resolve
+/// `Context<T>` handlers against `#[derive(Accounts)]` structs in other files.
 #[derive(Clone, Copy)]
 pub struct RuleContext<'a> {
     pub files: &'a [ParsedFile],
+    pub global: &'a GlobalIndex,
+}
+
+impl<'a> RuleContext<'a> {
+    /// Build a full scan context (files + precomputed workspace index).
+    pub fn new(files: &'a [ParsedFile], global: &'a GlobalIndex) -> Self {
+        Self { files, global }
+    }
+
+    /// Unit-test helper: files only, empty cross-file index.
+    ///
+    /// Prefer this over constructing `RuleContext` fields by hand in rule tests.
+    pub fn files_only(files: &'a [ParsedFile]) -> Self {
+        Self {
+            files,
+            global: &EMPTY_GLOBAL_INDEX,
+        }
+    }
 }
 
 pub struct RuleRegistry {

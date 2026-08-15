@@ -261,9 +261,7 @@ mod tests {
     fn run(file: &ParsedFile) -> Vec<RuleMatch> {
         UncheckedArithmeticRule.match_file(
             file,
-            &RuleContext {
-                files: std::slice::from_ref(file),
-            },
+            &RuleContext::files_only(std::slice::from_ref(file)),
         )
     }
 

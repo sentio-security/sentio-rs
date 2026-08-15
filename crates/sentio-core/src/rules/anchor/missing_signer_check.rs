@@ -160,9 +160,7 @@ mod tests {
         let rule = MissingSignerCheckRule;
         let findings = rule.match_file(
             &file,
-            &RuleContext {
-                files: std::slice::from_ref(&file),
-            },
+            &RuleContext::files_only(std::slice::from_ref(&file)),
         );
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].rule_id, "SW001");
@@ -187,9 +185,7 @@ mod tests {
         let rule = MissingSignerCheckRule;
         let findings = rule.match_file(
             &file,
-            &RuleContext {
-                files: std::slice::from_ref(&file),
-            },
+            &RuleContext::files_only(std::slice::from_ref(&file)),
         );
         assert!(findings.is_empty());
     }
@@ -222,9 +218,7 @@ mod tests {
         let rule = MissingSignerCheckRule;
         let findings = rule.match_file(
             &file,
-            &RuleContext {
-                files: std::slice::from_ref(&file),
-            },
+            &RuleContext::files_only(std::slice::from_ref(&file)),
         );
         assert!(findings.is_empty());
     }
@@ -247,9 +241,7 @@ mod tests {
         let rule = MissingSignerCheckRule;
         let findings = rule.match_file(
             &file,
-            &RuleContext {
-                files: std::slice::from_ref(&file),
-            },
+            &RuleContext::files_only(std::slice::from_ref(&file)),
         );
         assert!(findings.is_empty());
     }
@@ -271,9 +263,7 @@ mod tests {
         let rule = MissingSignerCheckRule;
         let findings = rule.match_file(
             &file,
-            &RuleContext {
-                files: std::slice::from_ref(&file),
-            },
+            &RuleContext::files_only(std::slice::from_ref(&file)),
         );
         assert!(findings.is_empty());
     }
@@ -301,9 +291,7 @@ mod tests {
         let rule = MissingSignerCheckRule;
         let findings = rule.match_file(
             &file,
-            &RuleContext {
-                files: std::slice::from_ref(&file),
-            },
+            &RuleContext::files_only(std::slice::from_ref(&file)),
         );
         assert!(
             findings.is_empty(),
@@ -328,9 +316,7 @@ mod tests {
         let rule = MissingSignerCheckRule;
         let findings = rule.match_file(
             &file,
-            &RuleContext {
-                files: std::slice::from_ref(&file),
-            },
+            &RuleContext::files_only(std::slice::from_ref(&file)),
         );
         assert!(findings.is_empty());
     }
@@ -373,9 +359,7 @@ mod tests {
         let rule = MissingSignerCheckRule;
         let findings = rule.match_file(
             &file,
-            &RuleContext {
-                files: std::slice::from_ref(&file),
-            },
+            &RuleContext::files_only(std::slice::from_ref(&file)),
         );
         assert!(
             findings.is_empty(),

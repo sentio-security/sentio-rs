@@ -182,9 +182,7 @@ mod tests {
         let file = parse_file(source);
         DivisionByZeroRule.match_file(
             &file,
-            &RuleContext {
-                files: std::slice::from_ref(&file),
-            },
+            &RuleContext::files_only(std::slice::from_ref(&file)),
         )
     }
 
