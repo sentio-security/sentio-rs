@@ -1,4 +1,8 @@
-//! Phase A integration: config, exclude, disabled rules, severity override, baseline, SARIF.
+//! Integration tests for scan configuration and reporting.
+//!
+//! Covers `ScanOptions` / `SentioConfig` behavior that ships with the product surface:
+//! disabled rules, severity overrides, path excludes, baseline filtering, fail-on
+//! thresholds, and SARIF export.
 
 use sentio_core::{
     to_sarif_json, Baseline, FailOn, RuleRegistry, ScanOptions, Scanner, SentioConfig, Severity,
@@ -13,7 +17,7 @@ fn create_temp_dir(label: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .expect("system time should be valid")
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!("sentio-phase-a-{label}-{unique}"));
+    let dir = std::env::temp_dir().join(format!("sentio-scan-config-{label}-{unique}"));
     fs::create_dir_all(&dir).expect("temp dir should be created");
     dir
 }

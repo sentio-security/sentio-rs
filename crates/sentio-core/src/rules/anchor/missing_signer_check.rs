@@ -19,14 +19,13 @@ impl Rule for MissingSignerCheckRule {
         &METADATA
     }
 
-    fn match_file(&self, file: &ParsedFile, _ctx: &RuleContext<'_>) -> Vec<RuleMatch> {
+    fn match_file(&self, file: &ParsedFile, ctx: &RuleContext<'_>) -> Vec<RuleMatch> {
         let accounts_index = collect_anchor_accounts_index(&file.syntax);
         let instruction_index = collect_instruction_index(&file.syntax);
         let mut findings = Vec::new();
 
-        // Build a set of word tokens that appear in signer-referencing guards across all
-        // instruction functions — used to detect explicit is_signer checks in handler bodies.
-        let signer_guarded_tokens: Vec<String> = instruction_index
+        // Same-file guards (unit tests use empty GlobalIndex via `files_only`).
+        let local_signer_tokens: Vec<String> = instruction_index
             .functions
             .iter()
             .flat_map(|f| f.guards.iter())
@@ -41,6 +40,13 @@ impl Rule for MissingSignerCheckRule {
             .collect();
 
         for item in accounts_index.structs {
+            let struct_name = item.ast.name.as_str();
+
+            // Cross-file: handlers with `Context<StructName>` in other files.
+            // Union with same-file tokens so single-file programs keep working.
+            let mut signer_guarded_tokens = ctx.global.signer_guard_tokens_for(struct_name);
+            signer_guarded_tokens.extend(local_signer_tokens.iter().cloned());
+
             for field in item.fields {
                 let kind = &field.type_info.kind;
 
@@ -93,7 +99,8 @@ impl Rule for MissingSignerCheckRule {
                     continue;
                 }
 
-                // Explicit is_signer guard in any instruction handler body.
+                // Explicit is_signer guard in a handler for this accounts struct
+                // (same file or linked via GlobalIndex / Context<T>).
                 let has_signer_guard = signer_guarded_tokens.iter().any(|tok| tok == &field_name);
 
                 if !has_signer_guard {
@@ -349,5 +356,75 @@ mod tests {
             findings.is_empty(),
             "stored-pubkey admin must not be SW001: {findings:?}"
         );
+    }
+
+    #[test]
+    fn does_not_flag_when_is_signer_guard_in_other_file_via_global() {
+        use crate::global_index::GlobalIndex;
+
+        let accounts = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            #[derive(Accounts)]
+            pub struct Deposit<'info> {
+                #[account(mut)]
+                pub authority: AccountInfo<'info>,
+            }
+            "#,
+        );
+        let handler = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            pub fn deposit(ctx: Context<Deposit>) -> Result<()> {
+                require!(ctx.accounts.authority.is_signer, ErrorCode::Unauthorized);
+                Ok(())
+            }
+            "#,
+        );
+
+        let global = GlobalIndex::from_syn_files(&[&accounts.syntax, &handler.syntax]);
+        let files = [accounts, handler];
+        let ctx = RuleContext::new(&files, &global);
+
+        let rule = MissingSignerCheckRule;
+        let findings = rule.match_file(&files[0], &ctx);
+        assert!(
+            findings.is_empty(),
+            "cross-file is_signer via GlobalIndex must quiet SW001: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn still_flags_when_other_file_has_no_signer_guard() {
+        use crate::global_index::GlobalIndex;
+
+        let accounts = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            #[derive(Accounts)]
+            pub struct Deposit<'info> {
+                #[account(mut)]
+                pub authority: AccountInfo<'info>,
+            }
+            "#,
+        );
+        let handler = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            pub fn deposit(ctx: Context<Deposit>, amount: u64) -> Result<()> {
+                let _ = amount;
+                Ok(())
+            }
+            "#,
+        );
+
+        let global = GlobalIndex::from_syn_files(&[&accounts.syntax, &handler.syntax]);
+        let files = [accounts, handler];
+        let ctx = RuleContext::new(&files, &global);
+
+        let rule = MissingSignerCheckRule;
+        let findings = rule.match_file(&files[0], &ctx);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].rule_id, "SW001");
     }
 }

@@ -5,7 +5,7 @@
 //!
 //! - Phase 1: `Context<T>` → `accounts_struct` extraction
 //! - Phase 2/3: `GlobalIndex` merge + `RuleContext.global` (scanner builds once)
-//! - Phase 4: SW001 consumes `ctx.global` (un-ignore `safe_split_file_no_sw001`)
+//! - Phase 4: SW001 consumes `ctx.global` for cross-file `is_signer` guards
 
 mod common;
 
@@ -88,9 +88,7 @@ fn global_index_links_split_safe_fixture() {
 }
 
 /// Goal test: Accounts in one file, `is_signer` guard in another → no SW001.
-/// Ignored until SW001 reads `ctx.global` (Phase 4).
 #[test]
-#[ignore = "cross-file: SW001 GlobalIndex not wired yet"]
 fn safe_split_file_no_sw001() {
     let result = common::scan_fixture("cross_file/sw001/safe", "SW001");
     assert!(
@@ -102,7 +100,7 @@ fn safe_split_file_no_sw001() {
 
 #[test]
 fn risky_split_flags_sw001() {
-    // Per-file behavior: Accounts struct alone is enough to flag today.
+    // Handler has no is_signer guard — SW001 must still fire on Accounts file.
     let result = common::scan_fixture("cross_file/sw001/risky", "SW001");
     assert!(
         !result.findings.is_empty(),
