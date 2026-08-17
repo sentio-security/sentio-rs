@@ -26,10 +26,11 @@ impl Rule for ArbitraryCpiRule {
         &METADATA
     }
 
-    fn match_file(&self, file: &ParsedFile, _ctx: &RuleContext<'_>) -> Vec<RuleMatch> {
+    fn match_file(&self, file: &ParsedFile, ctx: &RuleContext<'_>) -> Vec<RuleMatch> {
         let index = collect_instruction_index(&file.syntax);
         let accounts = collect_anchor_accounts_index(&file.syntax);
-        let signer_fields = collect_signer_field_names(&accounts);
+        // Same-file Signers (unit tests / co-located Accounts).
+        let local_signers = collect_signer_field_names(&accounts);
         let mut findings = Vec::new();
 
         for function in &index.functions {
@@ -41,6 +42,14 @@ impl Rule for ArbitraryCpiRule {
 
             if cpi_calls.is_empty() {
                 continue;
+            }
+
+            // Union local Signers with Accounts struct from other files via Context<T>.
+            let mut signer_fields = local_signers.clone();
+            if let Some(ref accounts_name) = function.accounts_struct {
+                for name in ctx.global.signer_field_names_for(accounts_name) {
+                    signer_fields.insert(name);
+                }
             }
 
             for cpi_call in cpi_calls {
@@ -309,6 +318,53 @@ mod tests {
             run(&file).is_empty(),
             "validated program ID must clear SW003 even with signer in metas: {:?}",
             run(&file)
+        );
+    }
+
+    #[test]
+    fn confused_deputy_when_signer_on_accounts_in_other_file() {
+        use crate::global_index::GlobalIndex;
+
+        let accounts = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            #[derive(Accounts)]
+            pub struct Buy<'info> {
+                pub buyer: Signer<'info>,
+                /// CHECK: supposed royalty program — unvalidated
+                pub royalty_program: AccountInfo<'info>,
+            }
+            "#,
+        );
+        let handler = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            use solana_program::program::invoke;
+
+            pub fn buy(ctx: Context<Buy>) -> Result<()> {
+                invoke(
+                    &ix,
+                    &[
+                        ctx.accounts.buyer.to_account_info(),
+                        ctx.accounts.royalty_program.to_account_info(),
+                    ],
+                )?;
+                Ok(())
+            }
+            "#,
+        );
+
+        let global = GlobalIndex::from_syn_files(&[&accounts.syntax, &handler.syntax]);
+        let files = [accounts, handler];
+        let ctx = RuleContext::new(&files, &global);
+
+        let findings = ArbitraryCpiRule.match_file(&files[1], &ctx);
+        assert_eq!(findings.len(), 1);
+        assert!(
+            findings[0].message.to_lowercase().contains("signer")
+                || findings[0].message.to_lowercase().contains("confused"),
+            "cross-file Signer must upgrade to confused-deputy: {}",
+            findings[0].message
         );
     }
 }

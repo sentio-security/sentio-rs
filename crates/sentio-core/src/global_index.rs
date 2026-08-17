@@ -1,7 +1,9 @@
 //! Cross-file foundation: link `Context<Deposit>` handlers to `#[derive(Accounts)]`
 //! structs defined in other files. Not full cross-program CPI analysis.
 
-use crate::anchor_accounts::{collect_anchor_accounts_index, AnchorAccountsStruct};
+use crate::anchor_accounts::{
+    collect_anchor_accounts_index, AnchorAccountsStruct, AnchorFieldTypeKind,
+};
 use crate::instruction_analysis::{collect_instruction_index, InstructionFunction};
 use crate::syntax::ParsedFile;
 use std::collections::HashMap;
@@ -107,6 +109,35 @@ impl GlobalIndex {
                     .collect::<Vec<_>>()
             })
             .collect()
+    }
+
+    /// Field names typed as `Signer` or marked `#[account(signer)]` on an accounts struct.
+    /// Used by SW003 confused-deputy (signer privilege forwarded into CPI).
+    pub fn signer_field_names_for(&self, accounts_name: &str) -> Vec<String> {
+        let Some(accounts) = self.accounts(accounts_name) else {
+            return Vec::new();
+        };
+        accounts
+            .fields
+            .iter()
+            .filter_map(|field| {
+                let name = field.ast.name.clone()?;
+                let is_signer_type = field.type_info.kind == AnchorFieldTypeKind::Signer;
+                let has_signer_constraint = field.constraints.is_signer;
+                if is_signer_type || has_signer_constraint {
+                    Some(name)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    /// Whether any field on the accounts struct uses Anchor's `close = …` constraint.
+    pub fn has_close_constraint_for(&self, accounts_name: &str) -> bool {
+        self.accounts(accounts_name)
+            .map(|s| s.fields.iter().any(|f| f.constraints.close))
+            .unwrap_or(false)
     }
 }
 

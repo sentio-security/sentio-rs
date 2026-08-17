@@ -1,11 +1,9 @@
-//! Cross-file analysis foundations.
+//! Cross-file analysis: Accounts ↔ handler linking via `GlobalIndex`.
 //!
-//! Fixtures under `fixtures/cross_file/sw001/{risky,safe}/` split
-//! `#[derive(Accounts)]` and `pub fn deposit(ctx: Context<Deposit>, …)` across files.
+//! Fixtures under `fixtures/cross_file/sw00{1,2,3,22}/{risky,safe}/` split
+//! `#[derive(Accounts)]` from instruction handlers.
 //!
-//! - Phase 1: `Context<T>` → `accounts_struct` extraction
-//! - Phase 2/3: `GlobalIndex` merge + `RuleContext.global` (scanner builds once)
-//! - Phase 4: SW001 consumes `ctx.global` for cross-file `is_signer` guards
+//! Migrated rules: SW001 (signer), SW002 (owner), SW003 (CPI signers), SW022 (close).
 
 mod common;
 
@@ -107,4 +105,78 @@ fn risky_split_flags_sw001() {
         "risky fixture must produce SW001"
     );
     assert!(result.findings.iter().all(|f| f.rule_id == "SW001"));
+}
+
+// ── SW002 ───────────────────────────────────────────────────────────────────
+
+#[test]
+fn safe_split_file_no_sw002() {
+    let result = common::scan_fixture("cross_file/sw002/safe", "SW002");
+    assert!(
+        result.findings.is_empty(),
+        "cross-file owner guard must quiet SW002: {:?}",
+        result.findings
+    );
+}
+
+#[test]
+fn risky_split_flags_sw002() {
+    let result = common::scan_fixture("cross_file/sw002/risky", "SW002");
+    assert!(
+        !result.findings.is_empty(),
+        "risky fixture must produce SW002"
+    );
+    assert!(result.findings.iter().all(|f| f.rule_id == "SW002"));
+}
+
+// ── SW003 ───────────────────────────────────────────────────────────────────
+
+#[test]
+fn risky_split_flags_sw003_confused_deputy() {
+    let result = common::scan_fixture("cross_file/sw003/risky", "SW003");
+    assert!(
+        !result.findings.is_empty(),
+        "split-file unvalidated CPI with Signer must flag SW003"
+    );
+    assert!(result.findings.iter().all(|f| f.rule_id == "SW003"));
+    assert!(
+        result.findings.iter().any(|f| {
+            let m = f.message.to_lowercase();
+            m.contains("signer") || m.contains("confused")
+        }),
+        "must use confused-deputy messaging when Signer is on Accounts file: {:?}",
+        result.findings
+    );
+}
+
+#[test]
+fn safe_split_file_no_sw003() {
+    let result = common::scan_fixture("cross_file/sw003/safe", "SW003");
+    assert!(
+        result.findings.is_empty(),
+        "program key check must quiet SW003: {:?}",
+        result.findings
+    );
+}
+
+// ── SW022 ───────────────────────────────────────────────────────────────────
+
+#[test]
+fn safe_split_file_no_sw022() {
+    let result = common::scan_fixture("cross_file/sw022/safe", "SW022");
+    assert!(
+        result.findings.is_empty(),
+        "close on Accounts file must quiet SW022 drain in handler: {:?}",
+        result.findings
+    );
+}
+
+#[test]
+fn risky_split_flags_sw022() {
+    let result = common::scan_fixture("cross_file/sw022/risky", "SW022");
+    assert!(
+        !result.findings.is_empty(),
+        "manual drain without close must flag SW022"
+    );
+    assert!(result.findings.iter().all(|f| f.rule_id == "SW022"));
 }

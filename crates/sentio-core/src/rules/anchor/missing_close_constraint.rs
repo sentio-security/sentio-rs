@@ -24,19 +24,18 @@ impl Rule for MissingCloseConstraintRule {
         &METADATA
     }
 
-    fn match_file(&self, file: &ParsedFile, _ctx: &RuleContext<'_>) -> Vec<RuleMatch> {
+    fn match_file(&self, file: &ParsedFile, ctx: &RuleContext<'_>) -> Vec<RuleMatch> {
         let accounts_index = collect_anchor_accounts_index(&file.syntax);
         let instruction_index = collect_instruction_index(&file.syntax);
         let mut findings = Vec::new();
 
-        // Check if the file already uses close constraint anywhere — if so, the author is
-        // aware of it and the manual drain may be intentional in a separate context.
-        let has_close_constraint = accounts_index
+        // Same-file: any `close =` means the author uses Anchor close in this file.
+        let local_has_close = accounts_index
             .structs
             .iter()
             .any(|s| s.fields.iter().any(|f| f.constraints.close));
 
-        if has_close_constraint {
+        if local_has_close {
             return findings;
         }
 
@@ -45,6 +44,13 @@ impl Rule for MissingCloseConstraintRule {
         // Report once per function (both the drain and the recipient top-up match,
         // but they describe the same closure operation).
         for function in &instruction_index.functions {
+            // Cross-file: `close` on the linked `Context<T>` Accounts struct quiet the drain.
+            if let Some(ref accounts_name) = function.accounts_struct {
+                if ctx.global.has_close_constraint_for(accounts_name) {
+                    continue;
+                }
+            }
+
             let drain = function.writes.iter().find(|w| {
                 let t = w.target.to_lowercase();
                 t.contains("lamports") && t.contains("borrow_mut")
@@ -176,5 +182,86 @@ mod tests {
         let findings =
             rule.match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
         assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn does_not_flag_when_close_on_accounts_in_other_file() {
+        use crate::global_index::GlobalIndex;
+
+        let accounts = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            #[derive(Accounts)]
+            pub struct CloseVault<'info> {
+                #[account(mut, close = authority)]
+                pub vault: Account<'info, Vault>,
+                #[account(mut)]
+                pub authority: Signer<'info>,
+            }
+            "#,
+        );
+        // Handler still has a residual manual drain pattern (legacy code path).
+        let handler = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            pub fn close_vault(ctx: Context<CloseVault>) -> Result<()> {
+                let vault = &ctx.accounts.vault;
+                let authority = &ctx.accounts.authority;
+                let lamports = vault.to_account_info().lamports();
+                **vault.to_account_info().lamports.borrow_mut() = 0;
+                **authority.lamports.borrow_mut() += lamports;
+                Ok(())
+            }
+            "#,
+        );
+
+        let global = GlobalIndex::from_syn_files(&[&accounts.syntax, &handler.syntax]);
+        let files = [accounts, handler];
+        let ctx = RuleContext::new(&files, &global);
+
+        let findings = MissingCloseConstraintRule.match_file(&files[1], &ctx);
+        assert!(
+            findings.is_empty(),
+            "close on Accounts in other file must quiet SW022: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn still_flags_manual_drain_when_accounts_file_has_no_close() {
+        use crate::global_index::GlobalIndex;
+
+        let accounts = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            #[derive(Accounts)]
+            pub struct CloseVault<'info> {
+                #[account(mut)]
+                pub vault: Account<'info, Vault>,
+                #[account(mut)]
+                pub authority: Signer<'info>,
+            }
+            "#,
+        );
+        let handler = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            pub fn close_vault(ctx: Context<CloseVault>) -> Result<()> {
+                let vault = &ctx.accounts.vault;
+                let authority = &ctx.accounts.authority;
+                let lamports = vault.to_account_info().lamports();
+                **vault.to_account_info().lamports.borrow_mut() = 0;
+                **authority.lamports.borrow_mut() += lamports;
+                Ok(())
+            }
+            "#,
+        );
+
+        let global = GlobalIndex::from_syn_files(&[&accounts.syntax, &handler.syntax]);
+        let files = [accounts, handler];
+        let ctx = RuleContext::new(&files, &global);
+
+        let findings = MissingCloseConstraintRule.match_file(&files[1], &ctx);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].rule_id, "SW022");
     }
 }
