@@ -42,6 +42,9 @@ pub fn handler_unit_counter(ctx: Context<Deposit>) -> Result<()> {
     Ok(())
 }
 
+// Note: packages with `[profile.release] overflow-checks = true` suppress SW005
+// entirely (see unit test suppresses_when_release_overflow_checks_enabled).
+
 /// Safe: account fields cast to u128 before arithmetic (standard overflow pattern).
 pub fn handler_u128_widen(ctx: Context<Deposit>, amount: u64) -> Result<()> {
     let _ = (amount as u128)

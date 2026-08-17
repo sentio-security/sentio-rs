@@ -135,12 +135,8 @@ mod tests {
         "#,
         );
         let rule = PdaSeedUnvalidatedAccountRule;
-        let findings = rule.match_file(
-            &file,
-            &RuleContext {
-                files: std::slice::from_ref(&file),
-            },
-        );
+        let findings =
+            rule.match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].rule_id, "SW013");
         assert!(findings[0].message.contains("user"));
@@ -160,12 +156,8 @@ mod tests {
         "#,
         );
         let rule = PdaSeedUnvalidatedAccountRule;
-        let findings = rule.match_file(
-            &file,
-            &RuleContext {
-                files: std::slice::from_ref(&file),
-            },
-        );
+        let findings =
+            rule.match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
         assert!(findings.is_empty());
     }
 
@@ -185,12 +177,8 @@ mod tests {
         "#,
         );
         let rule = PdaSeedUnvalidatedAccountRule;
-        let findings = rule.match_file(
-            &file,
-            &RuleContext {
-                files: std::slice::from_ref(&file),
-            },
-        );
+        let findings =
+            rule.match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
         assert!(findings.is_empty());
     }
 
@@ -208,12 +196,8 @@ mod tests {
         "#,
         );
         let rule = PdaSeedUnvalidatedAccountRule;
-        let findings = rule.match_file(
-            &file,
-            &RuleContext {
-                files: std::slice::from_ref(&file),
-            },
-        );
+        let findings =
+            rule.match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
         assert!(findings.is_empty());
     }
 }

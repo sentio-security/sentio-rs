@@ -1,5 +1,6 @@
 use crate::config::path_is_excluded;
 use crate::finding::{Finding, Severity};
+use crate::global_index::GlobalIndex;
 use crate::rules::{convert_severity, RuleContext, RuleRegistry, SuppressionSet};
 use crate::syntax::{parse_rust_files, ParseFailure, ParsedFile, SyntaxReport};
 use serde::Serialize;
@@ -102,7 +103,9 @@ impl Scanner {
     }
 
     fn run_rules(&self, files: &[ParsedFile], options: &ScanOptions) -> Vec<Finding> {
-        let ctx = RuleContext { files };
+        // Build once for the workspace so rules can link handlers ↔ Accounts across files.
+        let global = GlobalIndex::from_parsed_files(files);
+        let ctx = RuleContext::new(files, &global);
         let suppressions: Vec<(String, SuppressionSet)> = files
             .iter()
             .map(|file| {

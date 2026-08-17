@@ -180,12 +180,7 @@ mod tests {
 
     fn run(source: &str) -> Vec<RuleMatch> {
         let file = parse_file(source);
-        DivisionByZeroRule.match_file(
-            &file,
-            &RuleContext {
-                files: std::slice::from_ref(&file),
-            },
-        )
+        DivisionByZeroRule.match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)))
     }
 
     #[test]

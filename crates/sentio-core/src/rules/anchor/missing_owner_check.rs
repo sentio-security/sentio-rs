@@ -19,19 +19,18 @@ impl Rule for MissingOwnerCheckRule {
         &METADATA
     }
 
-    fn match_file(&self, file: &ParsedFile, _ctx: &RuleContext<'_>) -> Vec<RuleMatch> {
+    fn match_file(&self, file: &ParsedFile, ctx: &RuleContext<'_>) -> Vec<RuleMatch> {
         let accounts_index = collect_anchor_accounts_index(&file.syntax);
         let instruction_index = collect_instruction_index(&file.syntax);
         let mut findings = Vec::new();
 
-        // Build a set of field names that have an owner guard in any instruction function.
-        let guarded_names: Vec<String> = instruction_index
+        // Same-file owner guards (unit tests use empty GlobalIndex via `files_only`).
+        let local_owner_tokens: Vec<String> = instruction_index
             .functions
             .iter()
             .flat_map(|f| f.guards.iter())
             .filter(|g| g.references_owner)
             .flat_map(|g| {
-                // Extract word tokens from the expression that could be field names.
                 g.expression
                     .split(|c: char| !c.is_alphanumeric() && c != '_')
                     .filter(|s| !s.is_empty())
@@ -41,6 +40,12 @@ impl Rule for MissingOwnerCheckRule {
             .collect();
 
         for item in accounts_index.structs {
+            let struct_name = item.ast.name.as_str();
+
+            // Cross-file: handlers with `Context<StructName>` in other files.
+            let mut guarded_names = ctx.global.owner_guard_tokens_for(struct_name);
+            guarded_names.extend(local_owner_tokens.iter().cloned());
+
             for field in item.fields {
                 let kind = &field.type_info.kind;
 
@@ -72,11 +77,12 @@ impl Rule for MissingOwnerCheckRule {
                 // Identity-only: `.key()` and/or PDA seed input — never data/owner/lamports.
                 // Applies even when `mut` (payout keys copied into state / seeds).
                 // Does NOT skip "trust me, ZK / other program validates" without usage proof.
+                // Usage is still file-local (handler-only identity may still flag — known limit).
                 if analyze_account_field_usage(&file.syntax, &field_name).is_identity_only() {
                     continue;
                 }
 
-                // Check if any instruction guard references owner AND names this field.
+                // Owner guard in a handler for this accounts struct (same file or GlobalIndex).
                 let has_owner_guard = guarded_names.iter().any(|token| token == &field_name);
 
                 if !has_owner_guard {
@@ -139,12 +145,8 @@ mod tests {
         );
 
         let rule = MissingOwnerCheckRule;
-        let findings = rule.match_file(
-            &file,
-            &RuleContext {
-                files: std::slice::from_ref(&file),
-            },
-        );
+        let findings =
+            rule.match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].rule_id, "SW002");
     }
@@ -165,12 +167,8 @@ mod tests {
         );
 
         let rule = MissingOwnerCheckRule;
-        let findings = rule.match_file(
-            &file,
-            &RuleContext {
-                files: std::slice::from_ref(&file),
-            },
-        );
+        let findings =
+            rule.match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
         assert!(findings.is_empty());
     }
 
@@ -197,12 +195,8 @@ mod tests {
         );
 
         let rule = MissingOwnerCheckRule;
-        let findings = rule.match_file(
-            &file,
-            &RuleContext {
-                files: std::slice::from_ref(&file),
-            },
-        );
+        let findings =
+            rule.match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
         assert!(findings.is_empty());
     }
 
@@ -222,12 +216,8 @@ mod tests {
         );
 
         let rule = MissingOwnerCheckRule;
-        let findings = rule.match_file(
-            &file,
-            &RuleContext {
-                files: std::slice::from_ref(&file),
-            },
-        );
+        let findings =
+            rule.match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
         assert!(findings.is_empty());
     }
 
@@ -261,12 +251,8 @@ mod tests {
         );
 
         let rule = MissingOwnerCheckRule;
-        let findings = rule.match_file(
-            &file,
-            &RuleContext {
-                files: std::slice::from_ref(&file),
-            },
-        );
+        let findings =
+            rule.match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
         assert!(
             findings.is_empty(),
             "stored-pubkey admin must not be SW002: {findings:?}"
@@ -297,12 +283,8 @@ mod tests {
         );
 
         let rule = MissingOwnerCheckRule;
-        let findings = rule.match_file(
-            &file,
-            &RuleContext {
-                files: std::slice::from_ref(&file),
-            },
-        );
+        let findings =
+            rule.match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
         assert!(
             findings.is_empty(),
             "key() == stored pubkey must not be SW002: {findings:?}"
@@ -325,12 +307,8 @@ mod tests {
         );
 
         let rule = MissingOwnerCheckRule;
-        let findings = rule.match_file(
-            &file,
-            &RuleContext {
-                files: std::slice::from_ref(&file),
-            },
-        );
+        let findings =
+            rule.match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
         assert!(
             findings.is_empty(),
             "custom .owner == must not be SW002: {findings:?}"
@@ -368,12 +346,8 @@ mod tests {
         );
 
         let rule = MissingOwnerCheckRule;
-        let findings = rule.match_file(
-            &file,
-            &RuleContext {
-                files: std::slice::from_ref(&file),
-            },
-        );
+        let findings =
+            rule.match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
         assert!(
             findings.is_empty(),
             "mut identity-only must not be SW002: {findings:?}"
@@ -413,12 +387,8 @@ mod tests {
         );
 
         let rule = MissingOwnerCheckRule;
-        let findings = rule.match_file(
-            &file,
-            &RuleContext {
-                files: std::slice::from_ref(&file),
-            },
-        );
+        let findings =
+            rule.match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
         assert!(
             findings.is_empty(),
             "seed-only UncheckedAccount must not be SW002: {findings:?}"
@@ -448,16 +418,84 @@ mod tests {
         );
 
         let rule = MissingOwnerCheckRule;
-        let findings = rule.match_file(
-            &file,
-            &RuleContext {
-                files: std::slice::from_ref(&file),
-            },
-        );
+        let findings =
+            rule.match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
         assert_eq!(
             findings.len(),
             1,
             "data use without owner must still flag: {findings:?}"
         );
+    }
+
+    #[test]
+    fn does_not_flag_when_owner_guard_in_other_file_via_global() {
+        use crate::global_index::GlobalIndex;
+
+        let accounts = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            #[derive(Accounts)]
+            pub struct Load<'info> {
+                pub vault: AccountInfo<'info>,
+                pub authority: Signer<'info>,
+            }
+            "#,
+        );
+        let handler = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            pub fn load(ctx: Context<Load>) -> Result<()> {
+                require!(
+                    ctx.accounts.vault.owner == &token::ID,
+                    ErrorCode::InvalidOwner
+                );
+                let _data = ctx.accounts.vault.try_borrow_data()?;
+                Ok(())
+            }
+            "#,
+        );
+
+        let global = GlobalIndex::from_syn_files(&[&accounts.syntax, &handler.syntax]);
+        let files = [accounts, handler];
+        let ctx = RuleContext::new(&files, &global);
+
+        let findings = MissingOwnerCheckRule.match_file(&files[0], &ctx);
+        assert!(
+            findings.is_empty(),
+            "cross-file owner guard via GlobalIndex must quiet SW002: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn still_flags_when_other_file_has_no_owner_guard() {
+        use crate::global_index::GlobalIndex;
+
+        let accounts = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            #[derive(Accounts)]
+            pub struct Load<'info> {
+                pub vault: AccountInfo<'info>,
+                pub authority: Signer<'info>,
+            }
+            "#,
+        );
+        let handler = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            pub fn load(ctx: Context<Load>) -> Result<()> {
+                let _data = ctx.accounts.vault.try_borrow_data()?;
+                Ok(())
+            }
+            "#,
+        );
+
+        let global = GlobalIndex::from_syn_files(&[&accounts.syntax, &handler.syntax]);
+        let files = [accounts, handler];
+        let ctx = RuleContext::new(&files, &global);
+
+        let findings = MissingOwnerCheckRule.match_file(&files[0], &ctx);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].rule_id, "SW002");
     }
 }

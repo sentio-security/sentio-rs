@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use syn::parse::Parser;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
+use syn::{FnArg, GenericArgument, PatType, PathArguments, Type};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct InstructionIndex {
@@ -19,6 +20,9 @@ pub struct InstructionFunction {
     pub guards: Vec<GuardEvidence>,
     pub calls: Vec<CallEvidence>,
     pub writes: Vec<WriteEvidence>,
+    /// Last path segment of `T` when the fn takes `Context<…, T>` / `Context<T>`.
+    /// Used for cross-file linking of handlers → `#[derive(Accounts)]` structs.
+    pub accounts_struct: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -103,19 +107,25 @@ impl<'ast> Visit<'ast> for InstructionCollector {
     }
 
     fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
-        self.collect_function(node.sig.ident.to_string(), node.span(), &node.block);
+        self.collect_function(&node.sig, node.span(), &node.block);
     }
 
     fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
-        self.collect_function(node.sig.ident.to_string(), node.span(), &node.block);
+        self.collect_function(&node.sig, node.span(), &node.block);
     }
 }
 
 impl InstructionCollector {
-    fn collect_function(&mut self, name: String, span: proc_macro2::Span, block: &syn::Block) {
+    fn collect_function(
+        &mut self,
+        sig: &syn::Signature,
+        span: proc_macro2::Span,
+        block: &syn::Block,
+    ) {
         let mut collector = FunctionBodyCollector::default();
         collector.visit_block(block);
 
+        let name = sig.ident.to_string();
         self.functions.push(InstructionFunction {
             qualified_name: self.qualified_name(&name),
             name,
@@ -123,6 +133,7 @@ impl InstructionCollector {
             guards: collector.guards,
             calls: collector.calls,
             writes: collector.writes,
+            accounts_struct: extract_context_accounts_struct(sig),
         });
     }
 
@@ -695,6 +706,59 @@ fn accounts_field_from_expr(expr: &syn::Expr) -> Option<String> {
     }
 }
 
+/// Extract `T` from a function signature that takes `Context<… T>` / `Context<T>`.
+///
+/// Returns the last path segment of the accounts struct type (e.g. `Deposit` from
+/// `Context<'_, '_, '_, 'info, Deposit<'info>>` or `Context<Deposit>`).
+pub fn extract_context_accounts_struct(sig: &syn::Signature) -> Option<String> {
+    for input in &sig.inputs {
+        let FnArg::Typed(PatType { ty, .. }) = input else {
+            continue;
+        };
+        if let Some(name) = context_accounts_type_name(ty) {
+            return Some(name);
+        }
+    }
+    None
+}
+
+fn context_accounts_type_name(ty: &Type) -> Option<String> {
+    match ty {
+        Type::Path(type_path) => {
+            let segment = type_path.path.segments.last()?;
+            if segment.ident != "Context" {
+                return None;
+            }
+            let inner = first_generic_type(&segment.arguments)?;
+            type_last_path_ident(inner)
+        }
+        Type::Reference(r) => context_accounts_type_name(&r.elem),
+        Type::Paren(p) => context_accounts_type_name(&p.elem),
+        Type::Group(g) => context_accounts_type_name(&g.elem),
+        _ => None,
+    }
+}
+
+fn first_generic_type(arguments: &PathArguments) -> Option<&Type> {
+    let PathArguments::AngleBracketed(args) = arguments else {
+        return None;
+    };
+    args.args.iter().find_map(|arg| match arg {
+        GenericArgument::Type(ty) => Some(ty),
+        _ => None,
+    })
+}
+
+fn type_last_path_ident(ty: &Type) -> Option<String> {
+    match ty {
+        Type::Path(type_path) => type_path.path.segments.last().map(|s| s.ident.to_string()),
+        Type::Reference(r) => type_last_path_ident(&r.elem),
+        Type::Paren(p) => type_last_path_ident(&p.elem),
+        Type::Group(g) => type_last_path_ident(&g.elem),
+        _ => None,
+    }
+}
+
 /// True when `expr` is a path ending in `accounts` (optionally via `ctx` / `self` / etc.).
 fn expr_is_accounts_path(expr: &syn::Expr) -> bool {
     match expr {
@@ -742,6 +806,73 @@ mod tests {
         assert_eq!(index.functions.len(), 2);
         assert_eq!(index.functions[0].qualified_name, "instructions::process");
         assert_eq!(index.functions[1].qualified_name, "Processor::handle");
+        assert!(index.functions[0].accounts_struct.is_none());
+        assert!(index.functions[1].accounts_struct.is_none());
+    }
+
+    #[test]
+    fn extracts_context_accounts_struct_simple() {
+        let file = parse_file(
+            r#"
+            pub fn deposit(ctx: Context<Deposit>, amount: u64) -> Result<()> {
+                Ok(())
+            }
+            "#,
+        );
+        let index = collect_instruction_index(&file);
+        assert_eq!(index.functions.len(), 1);
+        assert_eq!(
+            index.functions[0].accounts_struct.as_deref(),
+            Some("Deposit")
+        );
+    }
+
+    #[test]
+    fn extracts_context_accounts_struct_with_lifetimes() {
+        let file = parse_file(
+            r#"
+            pub fn deposit<'info>(
+                ctx: Context<'_, '_, '_, 'info, Deposit<'info>>,
+                amount: u64,
+            ) -> Result<()> {
+                Ok(())
+            }
+            "#,
+        );
+        let index = collect_instruction_index(&file);
+        assert_eq!(
+            index.functions[0].accounts_struct.as_deref(),
+            Some("Deposit")
+        );
+    }
+
+    #[test]
+    fn extracts_context_from_qualified_path() {
+        let file = parse_file(
+            r#"
+            pub fn deposit(ctx: anchor_lang::context::Context<crate::accounts::Deposit>) -> Result<()> {
+                Ok(())
+            }
+            "#,
+        );
+        let index = collect_instruction_index(&file);
+        assert_eq!(
+            index.functions[0].accounts_struct.as_deref(),
+            Some("Deposit")
+        );
+    }
+
+    #[test]
+    fn no_accounts_struct_without_context_param() {
+        let file = parse_file(
+            r#"
+            pub fn helper(amount: u64) -> Result<()> {
+                Ok(())
+            }
+            "#,
+        );
+        let index = collect_instruction_index(&file);
+        assert!(index.functions[0].accounts_struct.is_none());
     }
 
     #[test]
