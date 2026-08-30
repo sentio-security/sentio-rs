@@ -545,20 +545,41 @@ fn get_simple_pat_ident(pat: &syn::Pat) -> Option<String> {
     }
 }
 
-/// Extract an account name from an expression string by looking for `.accounts.IDENT`.
-/// Returns `None` when the expression doesn't reference `ctx.accounts`.
+/// Extract an account field name from an expression string.
+///
+/// Supports:
+/// - `ctx.accounts.IDENT` / `self.accounts.IDENT` (handler with `Context`)
+/// - `self.IDENT` / `self.wrapper.IDENT` (`impl AccountsStruct` methods — Marinade style)
+///
+/// Returns `None` when the expression doesn't reference an accounts field.
 fn extract_account_name_from_str(s: &str) -> Option<String> {
-    let pos = s.find(".accounts.")?;
-    let after = &s[pos + ".accounts.".len()..];
-    let ident: String = after
-        .chars()
-        .take_while(|c| c.is_alphanumeric() || *c == '_')
-        .collect();
-    if ident.is_empty() {
-        None
-    } else {
-        Some(ident)
+    let compact: String = s.split_whitespace().collect();
+
+    if let Some(pos) = compact.find(".accounts.") {
+        let after = &compact[pos + ".accounts.".len()..];
+        let ident: String = after
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect();
+        if !ident.is_empty() {
+            return Some(ident);
+        }
     }
+
+    // `self.stake_program` or `self.common.stake_program` (last segment is the field).
+    if let Some(rest) = compact.strip_prefix("self.") {
+        let path = rest.split('(').next().unwrap_or(rest);
+        let last = path.split('.').rfind(|seg| !seg.is_empty()).unwrap_or("");
+        let ident: String = last
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect();
+        if !ident.is_empty() {
+            return Some(ident);
+        }
+    }
+
+    None
 }
 
 /// How an Accounts field is used in instruction bodies (and seeds attrs) in this file.

@@ -29,8 +29,10 @@ impl Rule for ArbitraryCpiRule {
     fn match_file(&self, file: &ParsedFile, ctx: &RuleContext<'_>) -> Vec<RuleMatch> {
         let index = collect_instruction_index(&file.syntax);
         let accounts = collect_anchor_accounts_index(&file.syntax);
-        // Same-file Signers (unit tests / co-located Accounts).
+        // Same-file Signers / Program fields (unit tests / co-located Accounts).
         let local_signers = collect_signer_field_names(&accounts);
+        let local_typed_programs = collect_typed_program_field_names(&accounts);
+        let local_unvalidated_programs = collect_unvalidated_program_field_names(&accounts);
         let mut findings = Vec::new();
 
         for function in &index.functions {
@@ -44,16 +46,38 @@ impl Rule for ArbitraryCpiRule {
                 continue;
             }
 
-            // Union local Signers with Accounts struct from other files via Context<T>.
+            // Union local fields with Accounts struct from other files via Context<T>.
             let mut signer_fields = local_signers.clone();
+            let mut typed_programs = local_typed_programs.clone();
+            let mut unvalidated_programs = local_unvalidated_programs.clone();
             if let Some(ref accounts_name) = function.accounts_struct {
                 for name in ctx.global.signer_field_names_for(accounts_name) {
                     signer_fields.insert(name);
+                }
+                if let Some(remote) = ctx.global.accounts(accounts_name) {
+                    for name in typed_program_names_from_struct(remote) {
+                        typed_programs.insert(name);
+                    }
+                    for name in unvalidated_program_names_from_struct(remote) {
+                        unvalidated_programs.insert(name);
+                    }
                 }
             }
 
             for cpi_call in cpi_calls {
                 if has_program_validation_before(function, cpi_call.order) {
+                    continue;
+                }
+
+                // Anchor already validates Program<'info, T> (ID + executable).
+                // Raw invoke through that account is not an arbitrary CPI target.
+                // Still flag if an unvalidated *program* AccountInfo/UncheckedAccount
+                // also appears in the metas (confused-deputy / dual-program cases).
+                if cpi_targets_anchor_typed_program(
+                    &cpi_call.cpi_account_names,
+                    &typed_programs,
+                    &unvalidated_programs,
+                ) {
                     continue;
                 }
 
@@ -163,6 +187,74 @@ fn collect_signer_field_names(
         }
     }
     names
+}
+
+fn collect_typed_program_field_names(
+    accounts: &crate::anchor_accounts::AnchorAccountsIndex,
+) -> HashSet<String> {
+    let mut names = HashSet::new();
+    for item in &accounts.structs {
+        names.extend(typed_program_names_from_struct(item));
+    }
+    names
+}
+
+fn collect_unvalidated_program_field_names(
+    accounts: &crate::anchor_accounts::AnchorAccountsIndex,
+) -> HashSet<String> {
+    let mut names = HashSet::new();
+    for item in &accounts.structs {
+        names.extend(unvalidated_program_names_from_struct(item));
+    }
+    names
+}
+
+fn typed_program_names_from_struct(
+    item: &crate::anchor_accounts::AnchorAccountsStruct,
+) -> HashSet<String> {
+    item.fields
+        .iter()
+        .filter(|f| f.type_info.kind == AnchorFieldTypeKind::Program)
+        .filter_map(|f| f.ast.name.clone())
+        .collect()
+}
+
+/// AccountInfo / UncheckedAccount fields whose names suggest a CPI program target.
+fn unvalidated_program_names_from_struct(
+    item: &crate::anchor_accounts::AnchorAccountsStruct,
+) -> HashSet<String> {
+    item.fields
+        .iter()
+        .filter(|f| {
+            matches!(
+                f.type_info.kind,
+                AnchorFieldTypeKind::AccountInfo | AnchorFieldTypeKind::UncheckedAccount
+            )
+        })
+        .filter_map(|f| f.ast.name.clone())
+        .filter(|name| name.to_ascii_lowercase().contains("program"))
+        .collect()
+}
+
+/// True when CPI account metas include an Anchor-typed `Program<'info, T>` and do not
+/// also include an unvalidated `*program*` AccountInfo/UncheckedAccount.
+fn cpi_targets_anchor_typed_program(
+    cpi_account_names: &[String],
+    typed_programs: &HashSet<String>,
+    unvalidated_programs: &HashSet<String>,
+) -> bool {
+    let has_typed = cpi_account_names
+        .iter()
+        .any(|m| typed_programs.iter().any(|t| t.eq_ignore_ascii_case(m)));
+    if !has_typed {
+        return false;
+    }
+    let has_unvalidated = cpi_account_names.iter().any(|m| {
+        unvalidated_programs
+            .iter()
+            .any(|u| u.eq_ignore_ascii_case(m))
+    });
+    !has_unvalidated
 }
 
 #[cfg(test)]
@@ -365,6 +457,170 @@ mod tests {
                 || findings[0].message.to_lowercase().contains("confused"),
             "cross-file Signer must upgrade to confused-deputy: {}",
             findings[0].message
+        );
+    }
+
+    #[test]
+    fn does_not_flag_invoke_through_typed_program_account() {
+        // Marinade-style: Program<'info, Stake> already pins the CPI target.
+        let file = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            use solana_program::program::invoke;
+
+            #[derive(Accounts)]
+            pub struct StakeReserve<'info> {
+                pub stake_program: Program<'info, Stake>,
+                #[account(mut)]
+                pub stake_account: AccountInfo<'info>,
+                pub rent: Sysvar<'info, Rent>,
+            }
+
+            pub fn process(ctx: Context<StakeReserve>) -> Result<()> {
+                invoke(
+                    &ix,
+                    &[
+                        ctx.accounts.stake_program.to_account_info(),
+                        ctx.accounts.stake_account.to_account_info(),
+                        ctx.accounts.rent.to_account_info(),
+                    ],
+                )?;
+                Ok(())
+            }
+            "#,
+        );
+        assert!(
+            run(&file).is_empty(),
+            "typed Program<'info, T> must quiet SW003: {:?}",
+            run(&file)
+        );
+    }
+
+    #[test]
+    fn does_not_flag_invoke_via_self_field_on_impl() {
+        // Real Marinade dialect: `impl StakeReserve { fn process(&mut self) { self.stake_program... } }`.
+        let file = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            use solana_program::program::{invoke, invoke_signed};
+
+            #[derive(Accounts)]
+            pub struct StakeReserve<'info> {
+                pub stake_program: Program<'info, Stake>,
+                #[account(mut)]
+                pub stake_account: AccountInfo<'info>,
+                /// CHECK: vote
+                pub validator_vote: UncheckedAccount<'info>,
+            }
+
+            impl<'info> StakeReserve<'info> {
+                pub fn process(&mut self) -> Result<()> {
+                    invoke(
+                        &ix,
+                        &[
+                            self.stake_program.to_account_info(),
+                            self.stake_account.to_account_info(),
+                        ],
+                    )?;
+                    invoke_signed(
+                        &ix2,
+                        &[
+                            self.stake_program.to_account_info(),
+                            self.stake_account.to_account_info(),
+                            self.validator_vote.to_account_info(),
+                        ],
+                        &[],
+                    )?;
+                    Ok(())
+                }
+            }
+            "#,
+        );
+        assert!(
+            run(&file).is_empty(),
+            "self.stake_program on impl must quiet SW003: {:?}",
+            run(&file)
+        );
+    }
+
+    #[test]
+    fn still_flags_when_unvalidated_program_alongside_typed_program() {
+        // token_program is typed, but royalty_program is the real (unvalidated) target.
+        let file = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            use solana_program::program::invoke;
+
+            #[derive(Accounts)]
+            pub struct Buy<'info> {
+                pub buyer: Signer<'info>,
+                /// CHECK: attacker-controlled
+                pub royalty_program: AccountInfo<'info>,
+                pub token_program: Program<'info, Token>,
+            }
+
+            pub fn buy(ctx: Context<Buy>) -> Result<()> {
+                invoke(
+                    &ix,
+                    &[
+                        ctx.accounts.buyer.to_account_info(),
+                        ctx.accounts.royalty_program.to_account_info(),
+                        ctx.accounts.token_program.to_account_info(),
+                    ],
+                )?;
+                Ok(())
+            }
+            "#,
+        );
+        let findings = run(&file);
+        assert_eq!(
+            findings.len(),
+            1,
+            "unvalidated *program* AccountInfo must still flag: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn typed_program_on_other_file_quiets_handler_cpi() {
+        use crate::global_index::GlobalIndex;
+
+        let accounts = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            #[derive(Accounts)]
+            pub struct StakeReserve<'info> {
+                pub stake_program: Program<'info, Stake>,
+                #[account(mut)]
+                pub stake_account: AccountInfo<'info>,
+            }
+            "#,
+        );
+        let handler = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            use solana_program::program::invoke_signed;
+
+            pub fn process(ctx: Context<StakeReserve>) -> Result<()> {
+                invoke_signed(
+                    &ix,
+                    &[
+                        ctx.accounts.stake_program.to_account_info(),
+                        ctx.accounts.stake_account.to_account_info(),
+                    ],
+                    &[],
+                )?;
+                Ok(())
+            }
+            "#,
+        );
+
+        let global = GlobalIndex::from_syn_files(&[&accounts.syntax, &handler.syntax]);
+        let files = [accounts, handler];
+        let ctx = RuleContext::new(&files, &global);
+        let findings = ArbitraryCpiRule.match_file(&files[1], &ctx);
+        assert!(
+            findings.is_empty(),
+            "cross-file typed Program must quiet SW003: {findings:?}"
         );
     }
 }
