@@ -93,20 +93,52 @@ impl<'ast> Visit<'ast> for UnwrapCollector {
         if is_panic {
             if !self.in_test && self.panic_nesting == 1 {
                 let receiver = node.receiver.to_token_stream().to_string();
-                let loc = node.span().start();
-                self.findings.push((
-                    format!(
-                        "`.{method}()` on `{}` will panic on None/Err; use `?` or \
-                         `.ok_or(ErrorCode::...)?` instead",
-                        receiver.split_whitespace().collect::<Vec<_>>().join(" ")
-                    ),
-                    loc.line,
-                    loc.column + 1,
-                ));
+                let receiver_compact = receiver.split_whitespace().collect::<Vec<_>>().join(" ");
+                // Production Anchor dialects often unwrap infallible PDA / borsh helpers.
+                // Keep flagging user-influenced Results (try_into, checked_*, CPI, account data).
+                if !is_benign_unwrap_receiver(&receiver_compact) {
+                    let loc = node.span().start();
+                    self.findings.push((
+                        format!(
+                            "`.{method}()` on `{receiver_compact}` will panic on None/Err; use `?` or \
+                             `.ok_or(ErrorCode::...)?` instead"
+                        ),
+                        loc.line,
+                        loc.column + 1,
+                    ));
+                }
             }
             self.panic_nesting -= 1;
         }
     }
+}
+
+/// Receivers that are noise on mature protocols, not attacker-chosen Options.
+fn is_benign_unwrap_receiver(receiver: &str) -> bool {
+    let compact: String = receiver.chars().filter(|c| !c.is_whitespace()).collect();
+    let lower = compact.to_ascii_lowercase();
+
+    // Pubkey::create_program_address / create_with_seed / find_program_address
+    // (and associated helpers that wrap those calls).
+    if lower.contains("create_program_address")
+        || lower.contains("create_with_seed")
+        || lower.contains("find_program_address")
+    {
+        return true;
+    }
+
+    // Fixed-layout borsh of Default / zeroed placeholders — effectively infallible size helpers.
+    // e.g. `ValidatorRecord::default().try_to_vec()` or `MaybeUninit::zeroed().assume_init().try_to_vec()`.
+    if lower.contains("try_to_vec")
+        && (lower.contains("::default()")
+            || lower.contains(".default()")
+            || lower.contains("assume_init")
+            || lower.contains("zeroed"))
+    {
+        return true;
+    }
+
+    false
 }
 
 #[cfg(test)]
@@ -244,5 +276,75 @@ mod tests {
         let findings =
             rule.match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
         assert_eq!(findings.len(), 2);
+    }
+
+    #[test]
+    fn does_not_flag_pubkey_create_program_address_unwrap() {
+        let file = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            pub fn helper(state: &Pubkey) -> Pubkey {
+                Pubkey::create_program_address(&[state.as_ref(), b"reserve"], &crate::ID).unwrap()
+            }
+            "#,
+        );
+        let findings = UnwrapOnResultRule
+            .match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
+        assert!(
+            findings.is_empty(),
+            "Pubkey::create_* unwrap must be quiet: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn does_not_flag_create_with_seed_unwrap() {
+        let file = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            pub fn default_msol_leg(state: &Pubkey) -> Pubkey {
+                Pubkey::create_with_seed(state, b"leg", &spl_token::ID).unwrap()
+            }
+            "#,
+        );
+        let findings = UnwrapOnResultRule
+            .match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
+        assert!(findings.is_empty(), "{findings:?}");
+    }
+
+    #[test]
+    fn does_not_flag_default_try_to_vec_unwrap() {
+        let file = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            #[derive(Default)]
+            pub struct ValidatorRecord { pub x: u64 }
+            pub fn size() -> usize {
+                ValidatorRecord::default().try_to_vec().unwrap().len()
+            }
+            "#,
+        );
+        let findings = UnwrapOnResultRule
+            .match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
+        assert!(
+            findings.is_empty(),
+            "default().try_to_vec() unwrap must be quiet: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn still_flags_user_input_try_into_unwrap() {
+        let file = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            pub fn process(raw: Vec<u8>) -> Result<()> {
+                let amount = u64::from_le_bytes(raw.try_into().unwrap());
+                let _ = amount;
+                Ok(())
+            }
+            "#,
+        );
+        let findings = UnwrapOnResultRule
+            .match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
+        assert_eq!(findings.len(), 1);
     }
 }

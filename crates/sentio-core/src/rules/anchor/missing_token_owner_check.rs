@@ -44,6 +44,17 @@ impl Rule for MissingTokenOwnerCheckRule {
                 }
 
                 let name = field.ast.name.clone().unwrap_or_default();
+
+                // User mint destinations / burn sources with mint pinned are normal Anchor
+                // dialect (Marinade mint_to, burn_from, transfer_*_to). Vault/custody
+                // accounts (e.g. `from`, `vault`) without authority still flag.
+                if field.constraints.has_token_mint_check()
+                    && (is_user_token_endpoint_name(&name)
+                        || has_companion_authority_signer(&item, &name))
+                {
+                    continue;
+                }
+
                 findings.push(RuleMatch {
                     rule_id: "SW010",
                     severity: RuleSeverity::Critical,
@@ -74,6 +85,35 @@ fn is_token_account(field: &AnchorAccountsField) -> bool {
         field.type_info.kind,
         AnchorFieldTypeKind::Account | AnchorFieldTypeKind::InterfaceAccount
     ) && field.type_info.display.contains("TokenAccount")
+}
+
+/// Names that typically mean "user-chosen token account" (mint dest / user burn source),
+/// not protocol vault custody.
+fn is_user_token_endpoint_name(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    // Keep classic custody / debit sources flagged.
+    if n == "from" || n == "vault" || n == "pool" || n.contains("leg") || n.contains("escrow") {
+        return false;
+    }
+    n == "mint_to"
+        || n.ends_with("_to")
+        || n.contains("destination")
+        || n.contains("recipient")
+        || n.starts_with("user_")
+        || n == "burn_from"
+        || (n.ends_with("_from") && (n.contains("burn") || n.starts_with("get_")))
+}
+
+/// `burn_from` + `burn_from_authority: Signer` (and similar) — authority checked via sibling.
+fn has_companion_authority_signer(
+    item: &crate::anchor_accounts::AnchorAccountsStruct,
+    token_field: &str,
+) -> bool {
+    let expected = format!("{token_field}_authority");
+    item.fields.iter().any(|f| {
+        f.ast.name.as_deref() == Some(expected.as_str())
+            && (f.type_info.kind == AnchorFieldTypeKind::Signer || f.constraints.is_signer)
+    })
 }
 
 #[cfg(test)]
@@ -230,6 +270,76 @@ mod tests {
         assert!(
             findings.is_empty(),
             "custom .owner == constraints should count: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn does_not_flag_user_mint_destination_with_mint_pinned() {
+        let file = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            use anchor_spl::token::{Mint, TokenAccount};
+
+            #[derive(Accounts)]
+            pub struct AddLiquidity<'info> {
+                #[account(mut, token::mint = lp_mint)]
+                pub mint_to: Account<'info, TokenAccount>,
+                pub lp_mint: Account<'info, Mint>,
+                pub user: Signer<'info>,
+            }
+            "#,
+        );
+        let findings = MissingTokenOwnerCheckRule
+            .match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
+        assert!(
+            findings.is_empty(),
+            "user mint_to with token::mint must be quiet: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn does_not_flag_burn_from_with_companion_authority_signer() {
+        let file = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            use anchor_spl::token::{Mint, TokenAccount};
+
+            #[derive(Accounts)]
+            pub struct RemoveLiquidity<'info> {
+                #[account(mut, token::mint = lp_mint)]
+                pub burn_from: Account<'info, TokenAccount>,
+                pub burn_from_authority: Signer<'info>,
+                pub lp_mint: Account<'info, Mint>,
+            }
+            "#,
+        );
+        let findings = MissingTokenOwnerCheckRule
+            .match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
+        assert!(findings.is_empty(), "{findings:?}");
+    }
+
+    #[test]
+    fn still_flags_vault_without_authority_even_with_mint() {
+        let file = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            use anchor_spl::token::{Mint, TokenAccount};
+
+            #[derive(Accounts)]
+            pub struct Withdraw<'info> {
+                #[account(mut, token::mint = mint)]
+                pub vault: Account<'info, TokenAccount>,
+                pub mint: Account<'info, Mint>,
+                pub admin: Signer<'info>,
+            }
+            "#,
+        );
+        let findings = MissingTokenOwnerCheckRule
+            .match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
+        assert_eq!(
+            findings.len(),
+            1,
+            "protocol vault must still require authority: {findings:?}"
         );
     }
 }
