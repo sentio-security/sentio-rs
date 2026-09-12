@@ -113,7 +113,7 @@ impl<'ast> Visit<'ast> for UnwrapCollector {
     }
 }
 
-/// Receivers that are noise on mature protocols (Marinade-style), not attacker-chosen Options.
+/// Receivers that are noise on mature protocols, not attacker-chosen Options.
 fn is_benign_unwrap_receiver(receiver: &str) -> bool {
     let compact: String = receiver.chars().filter(|c| !c.is_whitespace()).collect();
     let lower = compact.to_ascii_lowercase();
