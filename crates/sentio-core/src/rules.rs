@@ -296,6 +296,8 @@ fn parse_ignore_directive_in_comment(line: &str, directive: &str) -> Option<Vec<
 }
 
 /// Returns the `// ...` comment payload on a line, skipping `//` inside strings/chars.
+/// Distinguishes Rust lifetimes (`'info`) from char literals (`'x'`) so trailing
+/// `// sentio-ignore` after `AccountInfo<'info>` still works.
 fn line_comment_payload(line: &str) -> Option<&str> {
     let bytes = line.as_bytes();
     let mut i = 0;
@@ -335,6 +337,34 @@ fn line_comment_payload(line: &str) -> Option<&str> {
                 i += 1;
             }
             '\'' => {
+                // Lifetime `'foo` vs char `'x'` / `'\n'`.
+                if i + 1 < bytes.len() && bytes[i + 1] == b'\\' {
+                    in_single = true;
+                    i += 1;
+                    continue;
+                }
+                if i + 1 < bytes.len() {
+                    let next = bytes[i + 1] as char;
+                    if next.is_ascii_alphanumeric() || next == '_' {
+                        let mut j = i + 1;
+                        while j < bytes.len() {
+                            let ch = bytes[j] as char;
+                            if ch.is_ascii_alphanumeric() || ch == '_' {
+                                j += 1;
+                            } else {
+                                break;
+                            }
+                        }
+                        // `'a'` — single ident char then closing quote.
+                        if j == i + 2 && j < bytes.len() && bytes[j] == b'\'' {
+                            i = j + 1;
+                            continue;
+                        }
+                        // Lifetime — skip `'ident`.
+                        i = j;
+                        continue;
+                    }
+                }
                 in_single = true;
                 i += 1;
             }
@@ -512,5 +542,35 @@ pub fn demo() -> Result<()> {
             suppressed: false,
         };
         assert!(!suppressions.is_suppressed(&finding));
+    }
+
+    #[test]
+    fn trailing_ignore_after_lifetime_still_works() {
+        // Fixture style: `pub vault: AccountInfo<'info>, // sentio-ignore SW002`
+        let source = r#"
+use anchor_lang::prelude::*;
+#[derive(Accounts)]
+pub struct Withdraw<'info> {
+    pub vault: AccountInfo<'info>, // sentio-ignore SW002
+    pub authority: Signer<'info>,
+}
+"#;
+        let suppressions = SuppressionSet::from_source(source);
+        let finding = Finding {
+            rule_id: "SW002".to_string(),
+            severity: Severity::Critical,
+            message: String::new(),
+            location: SourceLocation {
+                path: "x.rs".to_string(),
+                line: 5,
+                column: 1,
+            },
+            help: None,
+            suppressed: false,
+        };
+        assert!(
+            suppressions.is_suppressed(&finding),
+            "trailing ignore after 'info lifetime must apply"
+        );
     }
 }
