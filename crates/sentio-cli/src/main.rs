@@ -135,7 +135,7 @@ fn run_scan(args: ScanArgs) -> Result<i32> {
     let registry = RuleRegistry::baseline();
     match args.format {
         OutputFormat::Human => {
-            render_human(&result);
+            render_human(&result)?;
             if result.baselined_count > 0 {
                 eprintln!(
                     "(Plus {} baselined finding(s) not shown)",
@@ -256,12 +256,17 @@ fn render_rule_list() -> Result<i32> {
     Ok(0)
 }
 
-fn render_human(result: &ScanResult) {
+fn render_human(result: &ScanResult) -> Result<()> {
     let registry = RuleRegistry::baseline();
     let stdout = io::stdout();
     let use_color = stdout.is_terminal();
     let mut locked = stdout.lock();
-    let _ = render_human_report(result, &registry, &mut locked, use_color);
+    match render_human_report(result, &registry, &mut locked, use_color) {
+        Ok(()) => Ok(()),
+        // `sentio scan . | head` closes the pipe early — not a real failure.
+        Err(err) if err.kind() == io::ErrorKind::BrokenPipe => Ok(()),
+        Err(err) => Err(err).context("failed to write human report"),
+    }
 }
 
 #[derive(Debug, Parser)]
