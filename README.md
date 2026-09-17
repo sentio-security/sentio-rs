@@ -24,6 +24,8 @@ sentio scan .
 
 That's it. Run from your Anchor workspace root (where `Anchor.toml` lives).
 
+**MSRV:** Rust **1.85+** (`rust-version` in `Cargo.toml`; required by `ureq` 3.3 and our toolchain choices).
+
 <p align="center">
   <img src="assets/demo.gif" alt="sentio scan demo" width="720" />
 </p>
