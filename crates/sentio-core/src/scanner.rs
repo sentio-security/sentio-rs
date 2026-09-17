@@ -32,10 +32,26 @@ pub struct ScanResult {
     /// Findings hidden because they matched a baseline (informational).
     #[serde(default, skip_serializing_if = "is_zero")]
     pub baselined_count: usize,
+    /// Accounts struct names that collided within a single program / scan scope
+    /// (first definition wins for GlobalIndex). Surfaced so multi-definition bugs
+    /// are not silent. Entries may be `name` or `program::name`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub duplicate_accounts_names: Vec<String>,
 }
 
 fn is_zero(n: &usize) -> bool {
     *n == 0
+}
+
+fn warn_duplicate_accounts(scope: &str, names: &[String]) {
+    if names.is_empty() {
+        return;
+    }
+    eprintln!(
+        "warning: duplicate #[derive(Accounts)] name(s) in {scope}: {}. \
+         First definition wins; cross-file rules (SW001/SW002/SW003/SW022) may mis-link.",
+        names.join(", ")
+    );
 }
 
 #[derive(Default)]
@@ -73,14 +89,51 @@ impl Scanner {
             );
         }
 
-        let file_paths: Vec<PathBuf> = roots
-            .iter()
-            .flat_map(|root| discover_rust_files(root, options))
-            .collect();
+        // One GlobalIndex per program root — same-named Accounts in different
+        // programs must not merge (issue #8).
+        let mut findings = Vec::new();
+        let mut parse_failures = Vec::new();
+        let mut duplicate_accounts_names = Vec::new();
+        let mut files_scanned = 0usize;
+        let mut files_parsed = 0usize;
 
-        let files_scanned = file_paths.len();
-        let syntax_report = parse_rust_files(file_paths);
-        self.scan_report(files_scanned, syntax_report, options)
+        for root in &roots {
+            let file_paths: Vec<PathBuf> = discover_rust_files(root, options).collect();
+            files_scanned += file_paths.len();
+            let report = parse_rust_files(file_paths);
+            files_parsed += report.files.len();
+            parse_failures.extend(report.parse_failures);
+
+            let scope = root
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| root.display().to_string());
+            let (root_findings, root_dups) = self.run_rules(&report.files, options);
+            findings.extend(root_findings);
+            for name in root_dups {
+                let labeled = if roots.len() > 1 {
+                    format!("{scope}::{name}")
+                } else {
+                    name
+                };
+                if !duplicate_accounts_names.iter().any(|n| n == &labeled) {
+                    duplicate_accounts_names.push(labeled);
+                }
+            }
+        }
+
+        if !duplicate_accounts_names.is_empty() {
+            warn_duplicate_accounts("scan", &duplicate_accounts_names);
+        }
+
+        ScanResult {
+            findings,
+            files_scanned,
+            files_parsed,
+            parse_failures,
+            baselined_count: 0,
+            duplicate_accounts_names,
+        }
     }
 
     pub fn scan_report(
@@ -90,7 +143,8 @@ impl Scanner {
         options: &ScanOptions,
     ) -> ScanResult {
         let files_parsed = report.files.len();
-        let findings = self.run_rules(&report.files, options);
+        let (findings, duplicate_accounts_names) = self.run_rules(&report.files, options);
+        warn_duplicate_accounts("scan", &duplicate_accounts_names);
         let parse_failures = report.parse_failures;
 
         ScanResult {
@@ -99,12 +153,19 @@ impl Scanner {
             files_parsed,
             parse_failures,
             baselined_count: 0,
+            duplicate_accounts_names,
         }
     }
 
-    fn run_rules(&self, files: &[ParsedFile], options: &ScanOptions) -> Vec<Finding> {
-        // Build once for the workspace so rules can link handlers ↔ Accounts across files.
+    /// Run rules with a GlobalIndex scoped to `files` only.
+    /// Returns findings and any duplicate Accounts struct names in that scope.
+    fn run_rules(
+        &self,
+        files: &[ParsedFile],
+        options: &ScanOptions,
+    ) -> (Vec<Finding>, Vec<String>) {
         let global = GlobalIndex::from_parsed_files(files);
+        let duplicate_accounts_names = global.duplicate_accounts_names.clone();
         let ctx = RuleContext::new(files, &global);
         let suppressions: Vec<(String, SuppressionSet)> = files
             .iter()
@@ -149,7 +210,7 @@ impl Scanner {
             }
         }
 
-        findings
+        (findings, duplicate_accounts_names)
     }
 }
 
@@ -200,7 +261,8 @@ fn resolve_scan_roots(path: &str, options: &ScanOptions) -> (Vec<PathBuf>, Optio
         Err(_) => return (vec![root], None),
     };
 
-    let parsed: toml::Value = match content.parse() {
+    // toml 1.x: use `from_str`, not `str::parse` — the latter rejects normal tables.
+    let parsed: toml::Value = match toml::from_str(&content) {
         Ok(v) => v,
         Err(_) => return (vec![root], None),
     };
@@ -232,9 +294,20 @@ fn resolve_scan_roots(path: &str, options: &ScanOptions) -> (Vec<PathBuf>, Optio
                 roots.extend(subdirs);
             }
         } else {
+            // Exact member path — also accept a directory of program crates.
             let p = root.join(member);
-            if p.exists() {
+            if p.is_dir() && p.join("Cargo.toml").exists() {
                 roots.push(p);
+            } else if p.is_dir() {
+                if let Ok(entries) = std::fs::read_dir(&p) {
+                    let mut subdirs: Vec<PathBuf> = entries
+                        .flatten()
+                        .map(|e| e.path())
+                        .filter(|d| d.is_dir() && d.join("Cargo.toml").exists())
+                        .collect();
+                    subdirs.sort();
+                    roots.extend(subdirs);
+                }
             }
         }
     }
@@ -316,4 +389,162 @@ fn is_test_path(path: &Path) -> bool {
         let part = component.as_os_str().to_string_lossy();
         matches!(part.as_ref(), "tests" | "test" | "fixtures")
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir(label: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("sentio-gi-{label}-{unique}"));
+        fs::create_dir_all(&dir).expect("temp dir");
+        dir
+    }
+
+    fn write(path: &Path, body: &str) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("mkdir");
+        }
+        fs::write(path, body).expect("write");
+    }
+
+    /// Two programs both define `Deposit` with different signer setups.
+    /// Per-program GlobalIndex: risky flags SW001, safe stays quiet.
+    #[test]
+    fn multi_program_same_accounts_name_keeps_separate_indexes() {
+        let root = temp_dir("multi");
+        write(
+            &root.join("Anchor.toml"),
+            "[workspace]\nmembers = [\"programs/*\"]\n",
+        );
+
+        // Risky: authority AccountInfo, no is_signer guard
+        write(
+            &root.join("programs/risky/Cargo.toml"),
+            "[package]\nname = \"risky\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        );
+        write(
+            &root.join("programs/risky/src/lib.rs"),
+            r#"
+            use anchor_lang::prelude::*;
+            #[derive(Accounts)]
+            pub struct Deposit<'info> {
+                #[account(mut)]
+                pub authority: AccountInfo<'info>,
+            }
+            pub fn deposit(_ctx: Context<Deposit>) -> Result<()> {
+                Ok(())
+            }
+            "#,
+        );
+
+        // Safe: same Accounts name, but is_signer in handler
+        write(
+            &root.join("programs/safe/Cargo.toml"),
+            "[package]\nname = \"safe\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        );
+        write(
+            &root.join("programs/safe/src/lib.rs"),
+            r#"
+            use anchor_lang::prelude::*;
+            #[derive(Accounts)]
+            pub struct Deposit<'info> {
+                #[account(mut)]
+                pub authority: AccountInfo<'info>,
+            }
+            pub fn deposit(ctx: Context<Deposit>) -> Result<()> {
+                require!(ctx.accounts.authority.is_signer, ErrorCode::Unauthorized);
+                Ok(())
+            }
+            #[error_code]
+            pub enum ErrorCode { Unauthorized }
+            "#,
+        );
+
+        assert!(root.join("Anchor.toml").is_file());
+        assert!(root.join("programs/risky/Cargo.toml").is_file());
+        assert!(root.join("programs/safe/Cargo.toml").is_file());
+
+        let (roots, programs) = resolve_scan_roots(root.to_str().unwrap(), &ScanOptions::default());
+        assert_eq!(
+            roots.len(),
+            2,
+            "expected 2 program roots, got {roots:?} programs={programs:?}"
+        );
+
+        let result = Scanner::new().scan_path(
+            root.to_str().expect("utf8"),
+            &ScanOptions {
+                rule_filter: Some("SW001".into()),
+                ..Default::default()
+            },
+        );
+
+        let sw001: Vec<_> = result
+            .findings
+            .iter()
+            .filter(|f| f.rule_id == "SW001")
+            .collect();
+        assert_eq!(
+            sw001.len(),
+            1,
+            "only risky program should flag SW001: {:?}",
+            result.findings
+        );
+        assert!(
+            sw001[0].location.path.contains("risky"),
+            "finding must be on risky program: {}",
+            sw001[0].location.path
+        );
+        assert!(
+            result.duplicate_accounts_names.is_empty(),
+            "cross-program same name must not count as in-scope duplicate: {:?}",
+            result.duplicate_accounts_names
+        );
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn duplicate_accounts_within_program_is_reported() {
+        let root = temp_dir("dup");
+        write(
+            &root.join("a.rs"),
+            r#"
+            use anchor_lang::prelude::*;
+            #[derive(Accounts)]
+            pub struct Deposit<'info> {
+                pub authority: Signer<'info>,
+            }
+            "#,
+        );
+        write(
+            &root.join("b.rs"),
+            r#"
+            use anchor_lang::prelude::*;
+            #[derive(Accounts)]
+            pub struct Deposit<'info> {
+                pub authority: AccountInfo<'info>,
+            }
+            "#,
+        );
+
+        let result =
+            Scanner::new().scan_path(root.to_str().expect("utf8"), &ScanOptions::default());
+        assert!(
+            result
+                .duplicate_accounts_names
+                .iter()
+                .any(|n| n == "Deposit"),
+            "expected Deposit in {:?}",
+            result.duplicate_accounts_names
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
 }

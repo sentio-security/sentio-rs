@@ -57,6 +57,7 @@ fn renders_detailed_human_report() {
         files_parsed: 1,
         parse_failures: Vec::new(),
         baselined_count: 0,
+        duplicate_accounts_names: vec![],
     };
 
     let mut output = Vec::new();
@@ -102,6 +103,7 @@ fn renders_human_report_with_ansi_color_when_enabled() {
         files_parsed: 1,
         parse_failures: Vec::new(),
         baselined_count: 0,
+        duplicate_accounts_names: vec![],
     };
 
     let mut output = Vec::new();
@@ -135,6 +137,7 @@ fn renders_markdown_report() {
         files_parsed: 1,
         parse_failures: Vec::new(),
         baselined_count: 0,
+        duplicate_accounts_names: vec![],
     };
 
     let md = render_markdown_report(&result, &RuleRegistry::baseline());
