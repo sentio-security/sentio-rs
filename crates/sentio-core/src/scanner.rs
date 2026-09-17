@@ -172,7 +172,7 @@ impl Scanner {
             .map(|file| {
                 (
                     file.path.display().to_string(),
-                    SuppressionSet::from_source(&file.source),
+                    SuppressionSet::from_parsed(&file.source, &file.syntax),
                 )
             })
             .collect();

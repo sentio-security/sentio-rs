@@ -8,6 +8,7 @@ use crate::syntax::ParsedFile;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::LazyLock;
+use syn::spanned::Spanned;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -162,24 +163,34 @@ impl SuppressionSet {
         }
     }
 
+    /// Build suppressions from source text (parses with `syn` when possible).
     pub fn from_source(source: &str) -> Self {
+        match syn::parse_file(source) {
+            Ok(file) => Self::from_parsed(source, &file),
+            // Still honor line/next-line comment directives when the snippet isn't a full file.
+            Err(_) => Self::from_parsed(source, &syn::parse_file("").expect("empty file")),
+        }
+    }
+
+    /// Build suppressions using AST fn spans for `sentio-ignore-fn` ranges.
+    pub fn from_parsed(source: &str, syntax: &syn::File) -> Self {
         let mut same_line: HashMap<usize, Vec<String>> = HashMap::new();
         let mut next_line: HashMap<usize, Vec<String>> = HashMap::new();
         let mut fn_ranges: Vec<(usize, usize, Vec<String>)> = Vec::new();
 
-        let lines: Vec<&str> = source.lines().collect();
+        let fn_spans = collect_fn_line_spans(syntax);
 
-        for (idx, line) in lines.iter().enumerate() {
+        for (idx, line) in source.lines().enumerate() {
             let line_no = idx + 1;
-            if let Some(ids) = parse_ignore_directive(line, "sentio-ignore-fn") {
-                // Scan forward from the next line to find the function's closing brace.
-                if let Some(end_line) = find_fn_end_line(&lines, idx + 1) {
-                    fn_ranges.push((line_no + 1, end_line, ids));
+            // Only honor directives that appear in real `//` comments (not string literals).
+            if let Some(ids) = parse_ignore_directive_in_comment(line, "sentio-ignore-fn") {
+                if let Some((fn_start, fn_end)) = first_fn_span_at_or_after(&fn_spans, line_no) {
+                    fn_ranges.push((fn_start, fn_end, ids));
                 }
-            } else if let Some(ids) = parse_ignore_directive(line, "sentio-ignore") {
+            } else if let Some(ids) = parse_ignore_directive_in_comment(line, "sentio-ignore") {
                 same_line.insert(line_no, ids);
             }
-            if let Some(ids) = parse_ignore_directive(line, "sentio-ignore-next-line") {
+            if let Some(ids) = parse_ignore_directive_in_comment(line, "sentio-ignore-next-line") {
                 next_line.insert(line_no + 1, ids);
             }
         }
@@ -208,30 +219,46 @@ impl SuppressionSet {
     }
 }
 
-/// Finds the 1-indexed line number of the closing brace of the first `{...}` block
-/// that starts at or after `from_idx` (0-indexed). Used to determine the end of a
-/// function body following a `sentio-ignore-fn` comment.
-fn find_fn_end_line(lines: &[&str], from_idx: usize) -> Option<usize> {
-    let mut depth = 0i32;
-    let mut started = false;
-    for (i, line) in lines[from_idx..].iter().enumerate() {
-        for ch in line.chars() {
-            match ch {
-                '{' => {
-                    depth += 1;
-                    started = true;
-                }
-                '}' => {
-                    depth -= 1;
-                    if started && depth == 0 {
-                        return Some(from_idx + i + 1); // convert to 1-indexed
-                    }
-                }
-                _ => {}
+/// `(start_line, end_line)` inclusive, 1-indexed, for every `fn` / impl method.
+fn collect_fn_line_spans(file: &syn::File) -> Vec<(usize, usize)> {
+    use syn::visit::Visit;
+
+    struct Collector(Vec<(usize, usize)>);
+
+    impl<'ast> Visit<'ast> for Collector {
+        fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
+            let start = node.span().start().line;
+            let end = node.span().end().line;
+            if start > 0 && end >= start {
+                self.0.push((start, end));
             }
+            syn::visit::visit_item_fn(self, node);
+        }
+
+        fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
+            let start = node.span().start().line;
+            let end = node.span().end().line;
+            if start > 0 && end >= start {
+                self.0.push((start, end));
+            }
+            syn::visit::visit_impl_item_fn(self, node);
         }
     }
-    None
+
+    let mut c = Collector(Vec::new());
+    c.visit_file(file);
+    c.0.sort_by_key(|(start, _)| *start);
+    c.0
+}
+
+fn first_fn_span_at_or_after(
+    spans: &[(usize, usize)],
+    comment_line: usize,
+) -> Option<(usize, usize)> {
+    spans
+        .iter()
+        .copied()
+        .find(|(start, _)| *start >= comment_line)
 }
 
 pub fn convert_severity(severity: RuleSeverity) -> Severity {
@@ -247,8 +274,11 @@ fn normalize_rule_id(rule_id: &str) -> String {
     rule_id.trim().to_uppercase()
 }
 
-fn parse_ignore_directive(line: &str, directive: &str) -> Option<Vec<String>> {
-    let lower = line.to_lowercase();
+/// Parse a sentio-ignore* directive only from a real `//` comment on the line
+/// (ignores the same text inside string / char literals).
+fn parse_ignore_directive_in_comment(line: &str, directive: &str) -> Option<Vec<String>> {
+    let comment = line_comment_payload(line)?;
+    let lower = comment.to_lowercase();
     let compact = lower.replace(char::is_whitespace, "");
     let marker = format!("//{directive}");
     let start = compact.find(&marker)? + marker.len();
@@ -263,6 +293,88 @@ fn parse_ignore_directive(line: &str, directive: &str) -> Option<Vec<String>> {
     } else {
         Some(ids)
     }
+}
+
+/// Returns the `// ...` comment payload on a line, skipping `//` inside strings/chars.
+/// Distinguishes Rust lifetimes (`'info`) from char literals (`'x'`) so trailing
+/// `// sentio-ignore` after `AccountInfo<'info>` still works.
+fn line_comment_payload(line: &str) -> Option<&str> {
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    let mut in_double = false;
+    let mut in_single = false;
+
+    while i < bytes.len() {
+        let c = bytes[i] as char;
+
+        if in_double {
+            if c == '\\' && i + 1 < bytes.len() {
+                i += 2;
+                continue;
+            }
+            if c == '"' {
+                in_double = false;
+            }
+            i += 1;
+            continue;
+        }
+
+        if in_single {
+            if c == '\\' && i + 1 < bytes.len() {
+                i += 2;
+                continue;
+            }
+            if c == '\'' {
+                in_single = false;
+            }
+            i += 1;
+            continue;
+        }
+
+        match c {
+            '"' => {
+                in_double = true;
+                i += 1;
+            }
+            '\'' => {
+                // Lifetime `'foo` vs char `'x'` / `'\n'`.
+                if i + 1 < bytes.len() && bytes[i + 1] == b'\\' {
+                    in_single = true;
+                    i += 1;
+                    continue;
+                }
+                if i + 1 < bytes.len() {
+                    let next = bytes[i + 1] as char;
+                    if next.is_ascii_alphanumeric() || next == '_' {
+                        let mut j = i + 1;
+                        while j < bytes.len() {
+                            let ch = bytes[j] as char;
+                            if ch.is_ascii_alphanumeric() || ch == '_' {
+                                j += 1;
+                            } else {
+                                break;
+                            }
+                        }
+                        // `'a'` — single ident char then closing quote.
+                        if j == i + 2 && j < bytes.len() && bytes[j] == b'\'' {
+                            i = j + 1;
+                            continue;
+                        }
+                        // Lifetime — skip `'ident`.
+                        i = j;
+                        continue;
+                    }
+                }
+                in_single = true;
+                i += 1;
+            }
+            '/' if i + 1 < bytes.len() && bytes[i + 1] == b'/' => {
+                return Some(&line[i..]);
+            }
+            _ => i += 1,
+        }
+    }
+    None
 }
 
 fn is_rule_id(id: &str) -> bool {
@@ -372,5 +484,93 @@ pub fn permissionless(ctx: Context<Foo>) -> Result<()> {
             suppressed: false,
         };
         assert!(!suppressions.is_suppressed(&finding));
+    }
+
+    #[test]
+    fn fn_ignore_does_not_extend_past_fn_when_string_has_brace() {
+        // Issue #9: raw brace-counting would see `{` in the string and swallow `other`.
+        let source = r#"
+// sentio-ignore-fn SW007
+pub fn permissionless() -> Result<()> {
+    msg!("missing { here");
+    Ok(())
+}
+pub fn other() -> Result<()> {
+    let should_flag = 1;
+    Ok(())
+}
+"#;
+        let suppressions = SuppressionSet::from_source(source);
+        let make = |line: usize| Finding {
+            rule_id: "SW007".to_string(),
+            severity: Severity::High,
+            message: String::new(),
+            location: SourceLocation {
+                path: "x.rs".to_string(),
+                line,
+                column: 1,
+            },
+            help: None,
+            suppressed: false,
+        };
+
+        assert!(suppressions.is_suppressed(&make(4))); // inside permissionless
+        assert!(!suppressions.is_suppressed(&make(8))); // other() must NOT be covered
+        assert!(!suppressions.is_suppressed(&make(9)));
+    }
+
+    #[test]
+    fn ignore_marker_inside_string_is_not_a_directive() {
+        let source = r#"
+pub fn demo() -> Result<()> {
+    let s = "// sentio-ignore SW012";
+    let a = 1;
+    Ok(())
+}
+"#;
+        let suppressions = SuppressionSet::from_source(source);
+        let finding = Finding {
+            rule_id: "SW012".to_string(),
+            severity: Severity::High,
+            message: String::new(),
+            location: SourceLocation {
+                path: "x.rs".to_string(),
+                line: 3,
+                column: 1,
+            },
+            help: None,
+            suppressed: false,
+        };
+        assert!(!suppressions.is_suppressed(&finding));
+    }
+
+    #[test]
+    fn trailing_ignore_after_lifetime_still_works() {
+        // Fixture style: `pub vault: AccountInfo<'info>, // sentio-ignore SW002`
+        let source = r#"
+use anchor_lang::prelude::*;
+#[derive(Accounts)]
+pub struct Withdraw<'info> {
+    pub vault: AccountInfo<'info>, // sentio-ignore SW002
+    pub authority: Signer<'info>,
+}
+"#;
+        let suppressions = SuppressionSet::from_source(source);
+        let finding = Finding {
+            rule_id: "SW002".to_string(),
+            severity: Severity::Critical,
+            message: String::new(),
+            location: SourceLocation {
+                path: "x.rs".to_string(),
+                line: 5,
+                column: 1,
+            },
+            help: None,
+            suppressed: false,
+        };
+        assert!(
+            suppressions.is_suppressed(&finding),
+            "trailing ignore after 'info lifetime must apply"
+        );
     }
 }
