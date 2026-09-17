@@ -25,6 +25,25 @@ pub fn render_human_report<W: Write>(
         writeln!(writer)?;
     }
 
+    if !result.duplicate_accounts_names.is_empty() {
+        writeln!(
+            writer,
+            "{}",
+            colorize(
+                "==============DUPLICATE ACCOUNTS NAMES==============",
+                "1;33",
+                use_color
+            )
+        )?;
+        writeln!(
+            writer,
+            "Same #[derive(Accounts)] name seen more than once in a program scope \
+             (first wins for cross-file linking): {}",
+            result.duplicate_accounts_names.join(", ")
+        )?;
+        writeln!(writer)?;
+    }
+
     if result.findings.is_empty() {
         if result.parse_failures.is_empty() {
             if result.baselined_count > 0 {
@@ -156,6 +175,12 @@ pub fn render_markdown_report(result: &ScanResult, registry: &RuleRegistry) -> S
         out.push_str(&format!(
             "- **Baselined (hidden):** {}\n",
             result.baselined_count
+        ));
+    }
+    if !result.duplicate_accounts_names.is_empty() {
+        out.push_str(&format!(
+            "- **Duplicate Accounts names:** {}\n",
+            result.duplicate_accounts_names.join(", ")
         ));
     }
     out.push_str(&format!(

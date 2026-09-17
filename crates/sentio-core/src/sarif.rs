@@ -272,6 +272,7 @@ mod tests {
             files_parsed: 1,
             parse_failures: vec![],
             baselined_count: 0,
+            duplicate_accounts_names: vec![],
         };
 
         let registry = RuleRegistry::baseline();
