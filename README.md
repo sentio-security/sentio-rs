@@ -55,6 +55,7 @@ sentio rules list
 Copy [`sentio.example.toml`](./sentio.example.toml) to `sentio.toml` for excludes, fail thresholds, and per-rule overrides.
 
 **Contribute:** [CONTRIBUTING.md](./CONTRIBUTING.md) — fork → branch → PR.  
+**Changelog** (severities, rules, releases): [CHANGELOG.md](./CHANGELOG.md).  
 **Limits (ZK, cross-program, AST):** [docs/LIMITATIONS.md](./docs/LIMITATIONS.md).
 
 ---
