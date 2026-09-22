@@ -72,6 +72,10 @@ Open a GitHub issue with:
 
 PRs that fix FPs with a regression test are preferred.
 
+## Security bugs in Sentio
+
+Vulnerabilities **in Sentio itself** (not scan FPs) → see [SECURITY.md](./SECURITY.md). Do not file those as public issues.
+
 ## Larger contributions
 
 - Prefer high-signal security / precision fixes and evaluation harness work (e.g. corpus / `sentio-bench`).
