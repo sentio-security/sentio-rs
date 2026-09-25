@@ -1,7 +1,11 @@
 use crate::finding::SourceLocation;
-use crate::instruction_analysis::{collect_instruction_index, CallKind};
 use crate::rules::{Rule, RuleContext, RuleMatch, RuleMetadata, RuleSeverity};
 use crate::syntax::ParsedFile;
+use quote::ToTokens;
+use std::collections::HashSet;
+use syn::spanned::Spanned;
+use syn::visit::{self, Visit};
+use syn::{Expr, ExprCall, ExprMethodCall, ImplItemFn, ItemFn, Local, Pat};
 
 #[derive(Debug, Default)]
 pub struct CpiRemainingAccountsRule;
@@ -27,61 +31,202 @@ impl Rule for CpiRemainingAccountsRule {
     }
 
     fn match_file(&self, file: &ParsedFile, _ctx: &RuleContext<'_>) -> Vec<RuleMatch> {
-        let index = collect_instruction_index(&file.syntax);
-        let source_lines: Vec<&str> = file.source.lines().collect();
-        let mut findings = Vec::new();
+         let mut scanner = ForwardScanner {
+            path: file.path.display().to_string(),
+            findings: Vec::new(),
+        };
+        visit::visit_file(&mut scanner, &file.syntax);
+        scanner.findings
+    }
+}
+struct ForwardScanner {
+    path: String,
+    findings: Vec<RuleMatch>,
+}
 
-        for function in &index.functions {
-            let cpi_calls: Vec<_> = function
-                .calls
-                .iter()
-                .filter(|c| c.kind == CallKind::Cpi)
-                .collect();
-
-            if cpi_calls.is_empty() {
-                continue;
-            }
-
-            // Check whether remaining_accounts appears in the function body.
-            let start = function.span.start_line.saturating_sub(1);
-            let end = function.span.end_line.min(source_lines.len());
-            let body_uses_remaining = source_lines[start..end]
-                .iter()
-                .any(|line| line.contains("remaining_accounts"));
-
-            if !body_uses_remaining {
-                continue;
-            }
-
-            // Flag the first CPI call in this function as the anchor location.
-            if let Some(cpi_call) = cpi_calls.first() {
-                findings.push(RuleMatch {
-                    rule_id: "SW023",
-                    severity: RuleSeverity::Critical,
-                    message: format!(
-                        "Function `{}` forwards `remaining_accounts` into a CPI; unvalidated \
-                         accounts retain outer-transaction signer privileges inside the call.",
-                        function.name
-                    ),
-                    location: SourceLocation {
-                        path: file.path.display().to_string(),
-                        line: cpi_call.span.start_line,
-                        column: cpi_call.span.start_column,
-                    },
-                    help: Some(
-                        "Declare CPI accounts explicitly in the Accounts struct with typed \
-                         constraints. If remaining_accounts is required, validate each account's \
-                         owner, key, and is_signer before forwarding it."
-                            .to_string(),
-                    ),
-                });
-            }
-        }
-
-        findings
+impl ForwardScanner {
+    fn push_finding(&mut self, function: &str, span: proc_macro2::Span) {
+        let loc = span.start();
+        self.findings.push(RuleMatch {
+            rule_id: "SW023",
+            severity: RuleSeverity::Critical,
+            message: format!(
+                "Function `{function}` forwards `remaining_accounts` into a CPI; unvalidated \
+                 accounts retain outer-transaction signer privileges inside the call."
+            ),
+            location: SourceLocation {
+                path: self.path.clone(),
+                line: loc.line,
+                column: loc.column + 1,
+            },
+            help: Some(
+                "Declare CPI accounts explicitly in the Accounts struct with typed \
+                 constraints. If remaining_accounts is required, validate each account's \
+                 owner, key, and is_signer before forwarding it."
+                    .to_string(),
+            ),
+        });
     }
 }
 
+impl<'ast> Visit<'ast> for ForwardScanner {
+    fn visit_item_fn(&mut self, node: &'ast ItemFn) {
+        if let Some(span) = forwarding_span(&node.block) {
+            self.push_finding(&node.sig.ident.to_string(), span);
+        }
+        visit::visit_item_fn(self, node);
+    }
+
+    fn visit_impl_item_fn(&mut self, node: &'ast ImplItemFn) {
+        if let Some(span) = forwarding_span(&node.block) {
+            self.push_finding(&node.sig.ident.to_string(), span);
+        }
+        visit::visit_impl_item_fn(self, node);
+    }
+}
+
+/// First CPI in this body whose arguments carry `remaining_accounts`.
+/// Nested functions are visited on their own by `ForwardScanner`.
+fn forwarding_span(block: &syn::Block) -> Option<proc_macro2::Span> {
+    let mut finder = ForwardFinder {
+        tainted: HashSet::new(),
+        forwarded: None,
+    };
+    finder.visit_block(block);
+    finder.forwarded
+}
+
+struct ForwardFinder {
+    tainted: HashSet<String>,
+    forwarded: Option<proc_macro2::Span>,
+}
+
+impl<'ast> Visit<'ast> for ForwardFinder {
+    fn visit_item_fn(&mut self, _node: &'ast ItemFn) {}
+    fn visit_impl_item_fn(&mut self, _node: &'ast ImplItemFn) {}
+
+    fn visit_local(&mut self, node: &'ast Local) {
+        visit::visit_local(self, node);
+        let Some(name) = simple_pat_ident(&node.pat) else {
+            return;
+        };
+        if node
+            .init
+            .as_ref()
+            .is_some_and(|init| expr_carries_remaining(&init.expr, &self.tainted))
+        {
+            self.tainted.insert(name);
+        }
+    }
+
+    fn visit_expr_assign(&mut self, node: &'ast syn::ExprAssign) {
+        visit::visit_expr_assign(self, node);
+        if expr_carries_remaining(&node.right, &self.tainted) {
+            if let Some(name) = expr_path_ident(&node.left) {
+                self.tainted.insert(name);
+            }
+        }
+    }
+
+    fn visit_expr_method_call(&mut self, node: &'ast ExprMethodCall) {
+        visit::visit_expr_method_call(self, node);
+        // `accounts.extend_from_slice(ctx.remaining_accounts)` taints `accounts`.
+        let mixes = matches!(
+            node.method.to_string().as_str(),
+            "extend" | "extend_from_slice" | "append" | "push" | "clone_from"
+        );
+        if mixes
+            && node
+                .args
+                .iter()
+                .any(|arg| expr_carries_remaining(arg, &self.tainted))
+        {
+            if let Some(name) = expr_path_ident(&node.receiver) {
+                self.tainted.insert(name);
+            }
+        }
+    }
+
+    fn visit_expr_call(&mut self, node: &'ast ExprCall) {
+        visit::visit_expr_call(self, node);
+        if self.forwarded.is_some() {
+            return;
+        }
+        let callee = node
+            .func
+            .to_token_stream()
+            .to_string()
+            .split_whitespace()
+            .collect::<String>();
+        if is_cpi_callee(&callee)
+            && node
+                .args
+                .iter()
+                .any(|arg| expr_carries_remaining(arg, &self.tainted))
+        {
+            self.forwarded = Some(node.span());
+        }
+    }
+}
+
+/// Same CPI names as `instruction_analysis::classify_call_kind`.
+fn is_cpi_callee(callee: &str) -> bool {
+    let lower = callee.to_lowercase();
+    callee == "invoke"
+        || callee == "invoke_signed"
+        || callee.ends_with("::invoke")
+        || callee.ends_with("::invoke_signed")
+        || callee.contains("CpiContext::new")
+        || callee.contains("CpiContext::new_with_signer")
+        || callee.starts_with("token::")
+        || callee.contains("anchor_spl::token::")
+        || lower.contains("cpicontext::new")
+}
+
+fn simple_pat_ident(pat: &Pat) -> Option<String> {
+    match pat {
+        Pat::Ident(p) => Some(p.ident.to_string()),
+        Pat::Type(p) => simple_pat_ident(&p.pat),
+        _ => None,
+    }
+}
+
+fn expr_path_ident(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Path(p) => p.path.get_ident().map(|id| id.to_string()),
+        Expr::Reference(r) => expr_path_ident(&r.expr),
+        _ => None,
+    }
+}
+
+fn expr_carries_remaining(expr: &Expr, tainted: &HashSet<String>) -> bool {
+    struct Finder<'a> {
+        tainted: &'a HashSet<String>,
+        hit: bool,
+    }
+    impl<'ast> Visit<'ast> for Finder<'_> {
+        fn visit_expr_path(&mut self, node: &'ast syn::ExprPath) {
+            if let Some(id) = node.path.get_ident() {
+                if self.tainted.contains(&id.to_string()) {
+                    self.hit = true;
+                }
+            }
+            visit::visit_expr_path(self, node);
+        }
+
+        fn visit_expr_field(&mut self, node: &'ast syn::ExprField) {
+            if let syn::Member::Named(id) = &node.member {
+                if id == "remaining_accounts" {
+                    self.hit = true;
+                }
+            }
+            visit::visit_expr_field(self, node);
+        }
+    }
+    let mut finder = Finder { tainted, hit: false };
+    finder.visit_expr(expr);
+    finder.hit
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -187,5 +332,44 @@ mod tests {
         let findings =
             rule.match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
         assert!(findings.is_empty());
+    }
+
+     #[test]
+    fn does_not_flag_remaining_accounts_read_beside_unrelated_cpi() {
+        let file = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+
+            #[derive(Accounts)]
+            pub struct Initialize<'info> {
+                pub creator: Signer<'info>,
+                pub token_program: Program<'info, Token>,
+                pub mint: Account<'info, Mint>,
+                pub destination: Account<'info, TokenAccount>,
+                pub authority: AccountInfo<'info>,
+            }
+
+            pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
+                let _ = support_mint_associated_is_initialized(&ctx.remaining_accounts)?;
+                token::token_mint_to(
+                    ctx.accounts.authority.to_account_info(),
+                    ctx.accounts.token_program.to_account_info(),
+                    ctx.accounts.mint.to_account_info(),
+                    ctx.accounts.destination.to_account_info(),
+                    1,
+                    &[],
+                )?;
+                Ok(())
+            }
+            "#,
+        );
+        let findings = CpiRemainingAccountsRule.match_file(
+            &file,
+            &RuleContext::files_only(std::slice::from_ref(&file)),
+        );
+        assert!(
+            findings.is_empty(),
+            "reading remaining_accounts must not flag an unrelated CPI: {findings:?}"
+        );
     }
 }
