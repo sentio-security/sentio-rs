@@ -31,7 +31,7 @@ impl Rule for CpiRemainingAccountsRule {
     }
 
     fn match_file(&self, file: &ParsedFile, _ctx: &RuleContext<'_>) -> Vec<RuleMatch> {
-         let mut scanner = ForwardScanner {
+        let mut scanner = ForwardScanner {
             path: file.path.display().to_string(),
             findings: Vec::new(),
         };
@@ -223,7 +223,10 @@ fn expr_carries_remaining(expr: &Expr, tainted: &HashSet<String>) -> bool {
             visit::visit_expr_field(self, node);
         }
     }
-    let mut finder = Finder { tainted, hit: false };
+    let mut finder = Finder {
+        tainted,
+        hit: false,
+    };
     finder.visit_expr(expr);
     finder.hit
 }
@@ -334,7 +337,7 @@ mod tests {
         assert!(findings.is_empty());
     }
 
-     #[test]
+    #[test]
     fn does_not_flag_remaining_accounts_read_beside_unrelated_cpi() {
         let file = parse_file(
             r#"
@@ -363,10 +366,8 @@ mod tests {
             }
             "#,
         );
-        let findings = CpiRemainingAccountsRule.match_file(
-            &file,
-            &RuleContext::files_only(std::slice::from_ref(&file)),
-        );
+        let findings = CpiRemainingAccountsRule
+            .match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
         assert!(
             findings.is_empty(),
             "reading remaining_accounts must not flag an unrelated CPI: {findings:?}"
