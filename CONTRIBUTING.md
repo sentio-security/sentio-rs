@@ -2,7 +2,7 @@
 
 ## Workflow
 
-1. **Fork** this repo (or use a branch with write access).
+1. **Fork** this repo.
 2. **Branch** from `main` (`git checkout -b fix/sw024-const` or `feat/...`).
 3. **Change** code + tests.
 4. **PR** into `main` of `sentio-security/sentio-rs`.
@@ -11,10 +11,10 @@ Do not commit directly to `main`. One PR ≈ one focused change.
 
 ## GitHub norms
 
-- **Verified commits** — sign commits (SSH or GPG) so GitHub shows them as **Verified**.  
-  - SSH: [Signing commits with SSH keys](https://docs.github.com/en/authentication/managing-commit-signature-verification/about-commit-signature-verification)  
+- **Verified commits** — sign commits (SSH or GPG) so GitHub shows them as **Verified**.
+  - SSH: [Signing commits with SSH keys](https://docs.github.com/en/authentication/managing-commit-signature-verification/about-commit-signature-verification)
   - Enable “Vigilant mode” / require verified commits on your account if you can.
-- **Conventional, clear messages** — e.g. `fix(SW003): …`, `feat: …`, `chore: bump rustls…`. Explain *why* in the body when non-obvious.
+- **Conventional, clear messages** — e.g. `fix(SW003): …`, `feat: …`, `chore: bump rustls…`. Explain _why_ in the body when non-obvious.
 - **Link issues** — use `Closes #N` / `Fixes #N` in the PR description (or commit body) so issues auto-close on merge.
 - **PR description** — what changed, how you tested, screenshots/logs only if useful. Keep the diff focused.
 - **Don’t force-push to `main`**; force-push on your feature branch only when rewriting history before review (or after addressing review, if agreed).
@@ -41,12 +41,12 @@ cargo test --all
 cargo audit
 ```
 
-| Command | Why |
-|---------|-----|
-| `cargo fmt` | Consistent style |
-| `cargo clippy -D warnings` | No new lint debt |
-| `cargo test --all` | Unit + integration green |
-| `cargo audit` | No known vulnerable deps in `Cargo.lock` |
+| Command                    | Why                                      |
+| -------------------------- | ---------------------------------------- |
+| `cargo fmt`                | Consistent style                         |
+| `cargo clippy -D warnings` | No new lint debt                         |
+| `cargo test --all`         | Unit + integration green                 |
+| `cargo audit`              | No known vulnerable deps in `Cargo.lock` |
 
 Install audit once: `cargo install cargo-audit --locked`.
 
@@ -54,11 +54,11 @@ If `cargo audit` fails on a transitive crate, prefer `cargo update -p <crate>` (
 
 ## Rules (sentio-core)
 
-| Do | Don't |
-|----|--------|
-| Add/update fixtures under `crates/sentio-core/tests/fixtures/swXXX/` | Ship a rule with no tests |
-| Keep `risky.rs` / `safe.rs` / `suppressed.rs` in sync | Flag style that is already safe (precision > recall) |
-| Register new rules in `RuleRegistry::baseline()` | Reuse an existing SW id |
+| Do                                                                   | Don't                                                |
+| -------------------------------------------------------------------- | ---------------------------------------------------- |
+| Add/update fixtures under `crates/sentio-core/tests/fixtures/swXXX/` | Ship a rule with no tests                            |
+| Keep `risky.rs` / `safe.rs` / `suppressed.rs` in sync                | Flag style that is already safe (precision > recall) |
+| Register new rules in `RuleRegistry::baseline()`                     | Reuse an existing SW id                              |
 
 New rule id: next free `SWxxx`. Match existing rule modules for structure.
 
