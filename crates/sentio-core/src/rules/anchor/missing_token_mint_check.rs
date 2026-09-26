@@ -37,6 +37,7 @@ impl Rule for MissingTokenMintCheckRule {
                 }
                 if field.constraints.has_token_mint_check()
                     || field.constraints.address
+                    || field.constraints.has_owner_or_address_check()
                     || field.constraints.init
                     || field.constraints.init_if_needed
                 {
@@ -208,5 +209,126 @@ mod tests {
             findings.is_empty(),
             "custom .mint == constraints should count: {findings:?}"
         );
+    }
+
+    #[test]
+    fn does_not_flag_mut_token_account_with_address_constraint() {
+        let file = parse_file(
+            r#"
+        use anchor_lang::prelude::*;
+        use anchor_spl::token::TokenAccount;
+
+        #[derive(Accounts)]
+        pub struct Test<'info> {
+            #[account(mut, address = expected.key())]
+            pub vault: Account<'info, TokenAccount>,
+            pub expected: UncheckedAccount<'info>,
+        }
+    "#,
+        );
+
+        let rule = MissingTokenMintCheckRule;
+        let findings =
+            rule.match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
+
+        assert_eq!(findings.len(), 0);
+    }
+
+    #[test]
+    fn does_not_flag_mut_token_account_with_owner_constraint() {
+        let file = parse_file(
+            r#"
+        use anchor_lang::prelude::*;
+        use anchor_spl::token::TokenAccount;
+
+        #[derive(Accounts)]
+        pub struct Test<'info> {
+            #[account(mut, owner = expected.key())]
+            pub vault: Account<'info, TokenAccount>,
+            pub expected: UncheckedAccount<'info>,
+        }
+    "#,
+        );
+
+        let rule = MissingTokenMintCheckRule;
+        let findings =
+            rule.match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
+
+        assert_eq!(findings.len(), 0);
+    }
+
+    #[test]
+    fn does_not_flag_mut_token_account_with_key_identity_constraint() {
+        let file = parse_file(
+            r#"
+        use anchor_lang::prelude::*;
+        use anchor_spl::token::TokenAccount;
+
+        #[derive(Accounts)]
+        pub struct Test<'info> {
+            #[account(
+                mut,
+                constraint = vault.key() == expected.key()
+            )]
+            pub vault: Account<'info, TokenAccount>,
+            pub expected: UncheckedAccount<'info>,
+        }
+    "#,
+        );
+
+        let rule = MissingTokenMintCheckRule;
+        let findings =
+            rule.match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
+
+        assert_eq!(findings.len(), 0);
+    }
+
+    #[test]
+    fn does_not_flag_mut_token_account_with_owner_identity_constraint() {
+        let file = parse_file(
+            r#"
+        use anchor_lang::prelude::*;
+        use anchor_spl::token::TokenAccount;
+
+        #[derive(Accounts)]
+        pub struct Test<'info> {
+            #[account(
+                mut,
+                constraint = vault.owner == expected.key()
+            )]
+            pub vault: Account<'info, TokenAccount>,
+            pub expected: UncheckedAccount<'info>,
+        }
+    "#,
+        );
+
+        let rule = MissingTokenMintCheckRule;
+        let findings =
+            rule.match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
+
+        assert_eq!(findings.len(), 0);
+    }
+
+    #[test]
+    fn flags_mut_token_account_without_identity_constraint() {
+        let file = parse_file(
+            r#"
+        use anchor_lang::prelude::*;
+        use anchor_spl::token::TokenAccount;
+
+        #[derive(Accounts)]
+        pub struct Test<'info> {
+            #[account(mut)]
+            pub vault: Account<'info, TokenAccount>,
+        }
+    "#,
+        );
+
+        let rule = MissingTokenMintCheckRule;
+        let findings =
+            rule.match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
+
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].rule_id, "SW009");
     }
 }
