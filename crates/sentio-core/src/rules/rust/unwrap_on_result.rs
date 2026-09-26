@@ -4,7 +4,7 @@ use crate::syntax::ParsedFile;
 use quote::ToTokens;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
-use syn::{ExprMethodCall, ItemFn};
+use syn::{ExprMethodCall, ItemFn, ItemMod};
 
 #[derive(Debug, Default)]
 pub struct UnwrapOnResultRule;
@@ -69,10 +69,23 @@ impl<'ast> Visit<'ast> for UnwrapCollector {
     fn visit_item_fn(&mut self, node: &'ast ItemFn) {
         // Skip functions marked #[test] to avoid noise from test utilities.
         let was_in_test = self.in_test;
-        if node.attrs.iter().any(|a| a.path().is_ident("test")) {
+        if node
+            .attrs
+            .iter()
+            .any(|a| a.path().is_ident("test") || attr_cfg_enables_test(a))
+        {
             self.in_test = true;
         }
         visit::visit_item_fn(self, node);
+        self.in_test = was_in_test;
+    }
+
+    fn visit_item_mod(&mut self, node: &'ast ItemMod) {
+        let was_in_test = self.in_test;
+        if node.attrs.iter().any(attr_cfg_enables_test) {
+            self.in_test = true;
+        }
+        visit::visit_item_mod(self, node);
         self.in_test = was_in_test;
     }
 
@@ -139,6 +152,37 @@ fn is_benign_unwrap_receiver(receiver: &str) -> bool {
     }
 
     false
+}
+
+/// `#[cfg(test)]`, `#[cfg(all(test, ...))]`, `#[cfg(any(test, ...))]`.
+/// `#[cfg(not(test))]` does not count: that item is the production build.
+fn attr_cfg_enables_test(attr: &syn::Attribute) -> bool {
+    let syn::Meta::List(list) = &attr.meta else {
+        return false;
+    };
+    if !list.path.is_ident("cfg") {
+        return false;
+    }
+    let Ok(meta) = syn::parse2::<syn::Meta>(list.tokens.clone()) else {
+        return false;
+    };
+    cfg_meta_enables_test(&meta)
+}
+
+fn cfg_meta_enables_test(meta: &syn::Meta) -> bool {
+    match meta {
+        syn::Meta::Path(path) => path.is_ident("test"),
+        syn::Meta::List(list) if list.path.is_ident("not") => false,
+        syn::Meta::List(list) if list.path.is_ident("all") || list.path.is_ident("any") => {
+            let Ok(nested) = list.parse_args_with(
+                syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
+            ) else {
+                return false;
+            };
+            nested.iter().any(cfg_meta_enables_test)
+        }
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -346,5 +390,40 @@ mod tests {
         let findings = UnwrapOnResultRule
             .match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
         assert_eq!(findings.len(), 1);
+    }
+
+    #[test]
+    fn does_not_flag_unwrap_in_cfg_test_helper() {
+        let file = parse_file(
+            r#"
+            #[cfg(test)]
+            pub mod test {
+                pub fn check_curve_value_from_swap(amount: u128) -> u128 {
+                    amount.checked_add(1).unwrap()
+                }
+            }
+            "#,
+        );
+        let findings = UnwrapOnResultRule
+            .match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
+        assert!(
+            findings.is_empty(),
+            "#[cfg(test)] helpers are not in the program: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn still_flags_unwrap_under_cfg_not_test() {
+        let file = parse_file(
+            r#"
+            #[cfg(not(test))]
+            pub fn handler(amount: u64) -> u64 {
+                amount.checked_add(1).unwrap()
+            }
+            "#,
+        );
+        let findings = UnwrapOnResultRule
+            .match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
+        assert_eq!(findings.len(), 1, "{findings:?}");
     }
 }
