@@ -75,7 +75,7 @@ Severities follow an audit rubric (also documented in the README):
 | Medium | Needs chaining / more context |
 | Low | Hygiene / observability |
 
-Notable **severity** moves (affects `--fail-on`):
+Notable **severity** moves (affects `--fail-on` and `--fail-on medium`):
 
 | Rule | Previous | New |
 |------|----------|-----|
@@ -86,9 +86,11 @@ Notable **severity** moves (affects `--fail-on`):
 | SW018 | Medium | **Low** |
 | SW020 | Medium | **Critical** |
 | SW023 | High | **Critical** |
+| SW025 | Medium | **Low** |
+
 
 Unchanged at Critical: SW001, SW002, SW003, SW006.  
-SW025 remains Medium; SW027 remains Low.
+SW027 remains Low.
 
 ---
 
