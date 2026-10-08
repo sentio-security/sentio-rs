@@ -19,7 +19,7 @@ impl Rule for UnwrapOnResultRule {
         static METADATA: RuleMetadata = RuleMetadata {
             id: "SW025",
             title: "unwrap() / expect() in instruction handler",
-            severity: RuleSeverity::Medium,
+            severity: RuleSeverity::Low,
             description: "Detects .unwrap() and .expect() calls in instruction handlers. \
                           In Solana programs these cause a runtime panic, which fails the \
                           transaction with a generic error and can be triggered by crafting \
@@ -50,7 +50,7 @@ impl Rule for UnwrapOnResultRule {
             .into_iter()
             .map(|(message, line, column)| RuleMatch {
                 rule_id: "SW025",
-                severity: RuleSeverity::Medium,
+                severity: RuleSeverity::Low,
                 message,
                 location: SourceLocation {
                     path: file.path.display().to_string(),
