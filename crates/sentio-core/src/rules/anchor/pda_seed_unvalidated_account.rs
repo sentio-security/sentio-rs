@@ -3,6 +3,7 @@ use crate::anchor_accounts::{
 };
 use crate::finding::SourceLocation;
 use crate::instruction_analysis::analyze_account_field_usage;
+use crate::rules::anchor::missing_owner_check::direct_callee_enforces_system_owner_and_pda_or_signer;
 use crate::rules::{Rule, RuleContext, RuleMatch, RuleMetadata, RuleSeverity};
 use crate::syntax::ParsedFile;
 
@@ -25,7 +26,7 @@ impl Rule for PdaSeedUnvalidatedAccountRule {
         &METADATA
     }
 
-    fn match_file(&self, file: &ParsedFile, _ctx: &RuleContext<'_>) -> Vec<RuleMatch> {
+    fn match_file(&self, file: &ParsedFile, ctx: &RuleContext<'_>) -> Vec<RuleMatch> {
         let index = collect_anchor_accounts_index(&file.syntax);
         let mut findings = Vec::new();
 
@@ -87,7 +88,17 @@ impl Rule for PdaSeedUnvalidatedAccountRule {
                     let identity_only_with_fixed_signer =
                         other_is_identity_only && has_fixed_identity_signer;
 
-                    if unverified && !has_validation && !identity_only_with_fixed_signer {
+                    let proved_in_callee = direct_callee_enforces_system_owner_and_pda_or_signer(
+                        ctx,
+                        item.ast.name.as_str(),
+                        &other_name,
+                    );
+
+                    if unverified
+                        && !has_validation
+                        && !identity_only_with_fixed_signer
+                        && !proved_in_callee
+                    {
                         let pda_name = pda_field.ast.name.clone().unwrap_or_default();
                         findings.push(RuleMatch {
                             rule_id: "SW013",
@@ -402,5 +413,74 @@ mod tests {
         findings.is_empty(),
         "multiple fixed identities in an OR constraint must count as fixed signer validation: {findings:?}"
     );
+    }
+
+    #[test]
+    fn does_not_flag_seed_when_direct_callee_checks_system_owner_and_pda_or_signer() {
+        let file = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            #[derive(Accounts)]
+            pub struct Create<'info> {
+                /// CHECK: system-owned until init
+                pub pool_state: UncheckedAccount<'info>,
+                #[account(seeds = [b"vault", pool_state.key().as_ref()], bump)]
+                pub vault: Account<'info, Vault>,
+            }
+            pub fn create(ctx: Context<Create>) -> Result<()> {
+                open(&ctx.accounts.pool_state.to_account_info())?;
+                Ok(())
+            }
+            pub fn open(account: &AccountInfo) -> Result<()> {
+                if account.owner != &system_program::ID {
+                    return err!(ErrorCode::NotApproved);
+                }
+                let (expect_pda_address, _bump) =
+                    Pubkey::find_program_address(&[b"pool"], &crate::id());
+                if account.key() != expect_pda_address {
+                    require_eq!(account.is_signer, true);
+                }
+                Ok(())
+            }
+            "#,
+        );
+        let findings = PdaSeedUnvalidatedAccountRule
+            .match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
+        assert!(
+            findings.is_empty(),
+            "seed account proved by a direct callee must not flag SW013: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn still_flags_seed_when_handler_and_callee_never_check_owner() {
+        let file = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            #[derive(Accounts)]
+            pub struct Create<'info> {
+                /// CHECK: used as seed
+                pub pool_state: UncheckedAccount<'info>,
+                #[account(seeds = [b"vault", pool_state.key().as_ref()], bump)]
+                pub vault: Account<'info, Vault>,
+            }
+            pub fn create(ctx: Context<Create>) -> Result<()> {
+                open(&ctx.accounts.pool_state.to_account_info())?;
+                Ok(())
+            }
+            pub fn open(account: &AccountInfo) -> Result<()> {
+                let _ = account.key();
+                Ok(())
+            }
+            "#,
+        );
+        let findings = PdaSeedUnvalidatedAccountRule
+            .match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
+        assert_eq!(
+            findings.len(),
+            1,
+            "unchecked seed with no owner check in the callee must stay SW013: {findings:?}"
+        );
+        assert!(findings[0].message.contains("pool_state"));
     }
 }
