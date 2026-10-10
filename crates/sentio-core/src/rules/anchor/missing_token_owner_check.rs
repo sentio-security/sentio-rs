@@ -2,6 +2,7 @@ use crate::anchor_accounts::{
     collect_anchor_accounts_index, AnchorAccountsField, AnchorFieldTypeKind,
 };
 use crate::finding::SourceLocation;
+use crate::rules::anchor::missing_token_mint_check::checked_cpi_has_safe_owner;
 use crate::rules::{Rule, RuleContext, RuleMatch, RuleMetadata, RuleSeverity};
 use crate::syntax::ParsedFile;
 
@@ -23,11 +24,11 @@ impl Rule for MissingTokenOwnerCheckRule {
         &METADATA
     }
 
-    fn match_file(&self, file: &ParsedFile, _ctx: &RuleContext<'_>) -> Vec<RuleMatch> {
+    fn match_file(&self, file: &ParsedFile, ctx: &RuleContext<'_>) -> Vec<RuleMatch> {
         let index = collect_anchor_accounts_index(&file.syntax);
         let mut findings = Vec::new();
 
-        for item in index.structs {
+        for item in &index.structs {
             for field in &item.fields {
                 if !is_token_account(field) {
                     continue;
@@ -51,8 +52,13 @@ impl Rule for MissingTokenOwnerCheckRule {
                 // accounts (e.g. `from`, `vault`) without authority still flag.
                 if field.constraints.has_token_mint_check()
                     && (is_user_token_endpoint_name(&name)
-                        || has_companion_authority_signer(&item, &name))
+                        || has_companion_authority_signer(item, &name))
                 {
+                    continue;
+                }
+
+                // `to` of a checked CPI is a credit. `from` is a debit and needs a Signer authority.
+                if checked_cpi_has_safe_owner(ctx, item, &name) {
                     continue;
                 }
 
@@ -463,5 +469,294 @@ mod tests {
 
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].rule_id, "SW010");
+    }
+
+    fn run_files(files: &[ParsedFile], index: usize) -> Vec<RuleMatch> {
+        use crate::global_index::GlobalIndex;
+
+        let syns: Vec<&syn::File> = files.iter().map(|file| &file.syntax).collect();
+        let global = GlobalIndex::from_syn_files(&syns);
+        let ctx = RuleContext::new(files, &global);
+        MissingTokenOwnerCheckRule.match_file(&files[index], &ctx)
+    }
+
+    #[test]
+    fn does_not_flag_credit_when_checked_transfer_mint_is_constrained() {
+        // Recipient has no token::mint. The name is not the proof. Authority is a PDA.
+        let handler = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            use anchor_spl::token::{Mint, TokenAccount};
+
+            #[derive(Accounts)]
+            pub struct Collect<'info> {
+                #[account(mut)]
+                pub recipient: Account<'info, TokenAccount>,
+                /// CHECK: pool authority pda
+                #[account(seeds = [b"auth"], bump)]
+                pub authority: UncheckedAccount<'info>,
+                #[account(address = vault.mint)]
+                pub mint: Account<'info, Mint>,
+                pub vault: Account<'info, TokenAccount>,
+            }
+
+            pub fn collect(ctx: Context<Collect>) -> Result<()> {
+                send(
+                    ctx.accounts.authority.to_account_info(),
+                    ctx.accounts.vault.to_account_info(),
+                    ctx.accounts.recipient.to_account_info(),
+                    ctx.accounts.mint.to_account_info(),
+                )?;
+                Ok(())
+            }
+            "#,
+        );
+        let helper = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            pub fn send(
+                authority: AccountInfo,
+                from: AccountInfo,
+                to: AccountInfo,
+                mint: AccountInfo,
+            ) -> Result<()> {
+                token::transfer_checked(
+                    CpiContext::new(
+                        program,
+                        TransferChecked { from, to, authority, mint },
+                    ),
+                    amount,
+                    decimals,
+                )?;
+                Ok(())
+            }
+            "#,
+        );
+        let files = [handler, helper];
+        let findings = run_files(&files, 0);
+        assert!(
+            findings.is_empty(),
+            "checked credit must quiet SW010: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn does_not_flag_receive_account_that_already_has_token_mint() {
+        let file = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            use anchor_spl::token::{Mint, TokenAccount};
+
+            #[derive(Accounts)]
+            pub struct Withdraw<'info> {
+                #[account(mut, token::mint = mint)]
+                pub token_0_account: Account<'info, TokenAccount>,
+                /// CHECK: pool authority pda
+                pub authority: UncheckedAccount<'info>,
+                #[account(address = vault.mint)]
+                pub mint: Account<'info, Mint>,
+                pub vault: Account<'info, TokenAccount>,
+            }
+
+            pub fn withdraw(ctx: Context<Withdraw>) -> Result<()> {
+                token::transfer_checked(
+                    CpiContext::new(
+                        program,
+                        TransferChecked {
+                            from: ctx.accounts.vault.to_account_info(),
+                            to: ctx.accounts.token_0_account.to_account_info(),
+                            authority: ctx.accounts.authority.to_account_info(),
+                            mint: ctx.accounts.mint.to_account_info(),
+                        },
+                    ),
+                    amount,
+                    decimals,
+                )?;
+                Ok(())
+            }
+            "#,
+        );
+        let findings = MissingTokenOwnerCheckRule
+            .match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
+        assert!(
+            findings.is_empty(),
+            "withdraw destination must quiet SW010: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn does_not_flag_debit_when_authority_is_signer() {
+        let file = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            use anchor_spl::token::{Mint, TokenAccount};
+
+            #[derive(Accounts)]
+            pub struct Swap<'info> {
+                pub payer: Signer<'info>,
+                #[account(mut)]
+                pub input_token_account: Account<'info, TokenAccount>,
+                #[account(address = vault.mint)]
+                pub mint: Account<'info, Mint>,
+                pub vault: Account<'info, TokenAccount>,
+            }
+
+            pub fn swap(ctx: Context<Swap>) -> Result<()> {
+                token::transfer_checked(
+                    CpiContext::new(
+                        program,
+                        TransferChecked {
+                            from: ctx.accounts.input_token_account.to_account_info(),
+                            to: ctx.accounts.vault.to_account_info(),
+                            authority: ctx.accounts.payer.to_account_info(),
+                            mint: ctx.accounts.mint.to_account_info(),
+                        },
+                    ),
+                    amount,
+                    decimals,
+                )?;
+                Ok(())
+            }
+            "#,
+        );
+        let findings = MissingTokenOwnerCheckRule
+            .match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
+        assert!(
+            findings.is_empty(),
+            "debit signed by a Signer must quiet SW010: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn still_flags_debit_when_authority_is_a_pda() {
+        let file = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            use anchor_spl::token::{Mint, TokenAccount};
+
+            #[derive(Accounts)]
+            pub struct Swap<'info> {
+                /// CHECK: pda
+                pub authority: UncheckedAccount<'info>,
+                #[account(mut)]
+                pub input_token_account: Account<'info, TokenAccount>,
+                #[account(address = vault.mint)]
+                pub mint: Account<'info, Mint>,
+                pub vault: Account<'info, TokenAccount>,
+            }
+
+            pub fn swap(ctx: Context<Swap>) -> Result<()> {
+                token::transfer_checked(
+                    CpiContext::new(
+                        program,
+                        TransferChecked {
+                            from: ctx.accounts.input_token_account.to_account_info(),
+                            to: ctx.accounts.vault.to_account_info(),
+                            authority: ctx.accounts.authority.to_account_info(),
+                            mint: ctx.accounts.mint.to_account_info(),
+                        },
+                    ),
+                    amount,
+                    decimals,
+                )?;
+                Ok(())
+            }
+            "#,
+        );
+        let findings = MissingTokenOwnerCheckRule
+            .match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
+        assert!(
+            findings
+                .iter()
+                .any(|finding| finding.message.contains("input_token_account")),
+            "pda authority on a debit must keep SW010: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn still_flags_plain_transfer_even_when_named_recipient() {
+        let file = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            use anchor_spl::token::TokenAccount;
+
+            #[derive(Accounts)]
+            pub struct Collect<'info> {
+                #[account(mut)]
+                pub recipient: Account<'info, TokenAccount>,
+                pub vault: Account<'info, TokenAccount>,
+            }
+
+            pub fn collect(ctx: Context<Collect>) -> Result<()> {
+                token::transfer(
+                    CpiContext::new(
+                        program,
+                        Transfer {
+                            from: ctx.accounts.vault.to_account_info(),
+                            to: ctx.accounts.recipient.to_account_info(),
+                            authority: ctx.accounts.vault.to_account_info(),
+                        },
+                    ),
+                    amount,
+                )?;
+                Ok(())
+            }
+            "#,
+        );
+        let findings = MissingTokenOwnerCheckRule
+            .match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
+        assert!(
+            findings
+                .iter()
+                .any(|finding| finding.message.contains("recipient")),
+            "unchecked transfer must keep SW010: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn still_flags_raw_invoke_alongside_checked_credit() {
+        let file = parse_file(
+            r#"
+            use anchor_lang::prelude::*;
+            use anchor_spl::token::{Mint, TokenAccount};
+
+            #[derive(Accounts)]
+            pub struct Collect<'info> {
+                #[account(mut)]
+                pub recipient: Account<'info, TokenAccount>,
+                /// CHECK: pda
+                pub authority: UncheckedAccount<'info>,
+                #[account(address = vault.mint)]
+                pub mint: Account<'info, Mint>,
+                pub vault: Account<'info, TokenAccount>,
+            }
+
+            pub fn collect(ctx: Context<Collect>) -> Result<()> {
+                token::transfer_checked(
+                    CpiContext::new(
+                        program,
+                        TransferChecked {
+                            from: ctx.accounts.vault.to_account_info(),
+                            to: ctx.accounts.recipient.to_account_info(),
+                            authority: ctx.accounts.authority.to_account_info(),
+                            mint: ctx.accounts.mint.to_account_info(),
+                        },
+                    ),
+                    amount,
+                    decimals,
+                )?;
+                invoke(&ix, &[ctx.accounts.recipient.to_account_info()])?;
+                Ok(())
+            }
+            "#,
+        );
+        let findings = MissingTokenOwnerCheckRule
+            .match_file(&file, &RuleContext::files_only(std::slice::from_ref(&file)));
+        assert!(
+            findings
+                .iter()
+                .any(|finding| finding.message.contains("recipient")),
+            "raw invoke must keep SW010: {findings:?}"
+        );
     }
 }
